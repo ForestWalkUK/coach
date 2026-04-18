@@ -1,969 +1,2136 @@
 <!DOCTYPE html>
+<!--
+  ============================================================
+  Walk-on Calculator  —  v1.8
+  ============================================================
+  A mobile-first tool for coach drivers to track walk-on
+  passenger capacity in real time across a multi-stop route.
+
+  FEATURES
+  ────────
+  · Configurable seat count (default 49) and stop count (2–10)
+  · Per-stop booked boarder / alighter entry via ± steppers or keypad
+  · Walk-on passengers added with individual destination stops
+  · Walk-ons auto-expire from the seat count when their stop is reached
+  · Destination-by-destination capacity tiles showing the minimum
+    available seats across every leg of each possible journey segment
+  · Pip navigation bar for reviewing / pre-entering any stop
+  · Double-tap depart guard to prevent accidental advancement
+  · Journey summary table at terminus
+
+  ARCHITECTURE
+  ────────────
+  Single HTML file.  CSS follows BEM (Block__Element--Modifier).
+  JavaScript is plain ES6, no frameworks or build step required.
+
+  NAMING CONVENTION  (BEM)
+  ────────────────────────
+  Block      .header, .screen, .card, .stepper, .btn, .pip-bar,
+             .banner, .walkon-list, .modal, .keypad, .dest-grid,
+             .summary-table
+  Element    block__element   e.g. .header__title, .card__label
+  Modifier   block--modifier  e.g. .btn--primary, .screen--active
+  ============================================================
+-->
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Walk-on Calculator v1.5</title>
-<style>
-:root {
-    --bg       : #f0f2f5;
-    --panel    : #ffffff;
-    --border   : #e0e3e8;
-    --accent   : #fea22a;
-    --accent2  : #97d700;
-    --danger   : #cc2222;
-    --text     : #2a2f3d;
-    --muted    : #6b7280;
-    --btn-h:   60px;
-    --radius:  12px;
-    --shadow:  0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
-  }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Walk-on Calculator v1.8</title>
 
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+  <!-- Google Fonts — Inter: weights 400 / 600 / 700 / 800 -->
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
+  </style>
 
-  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  <style>
+    /* ============================================================
+       DESIGN TOKENS  (CSS custom properties)
+       Centralised colour palette and shared measurements.
+       All components reference these variables — change here
+       to retheme the entire application.
+       ============================================================ */
+    :root {
+      --colour-bg        : #f0f2f5;          /* Page / screen background         */
+      --colour-panel     : #ffffff;          /* Card and modal surface            */
+      --colour-border    : #e0e3e8;          /* Default border colour             */
+      --colour-accent    : #fea22a;          /* Orange — Citylink brand highlight */
+      --colour-green     : #97d700;          /* Lime green — primary action colour*/
+      --colour-danger    : #cc2222;          /* Red — destructive / warning       */
+      --colour-text      : #2a2f3d;          /* Primary body text                 */
+      --colour-muted     : #6b7280;          /* Secondary / subdued text          */
 
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
-    min-height: 100dvh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
+      /* Greyscale stepper button palette */
+      --colour-btn-grey-bg     : #e9eaec;    /* Stepper ± button background       */
+      --colour-btn-grey-border : #c5c8ce;    /* Stepper ± button border           */
+      --colour-btn-grey-icon   : #4b5563;    /* Stepper ± symbol colour           */
 
-  /* ── Header ── */
-  .app-header {
-    width: 100%; max-width: 480px;
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 16px 12px;
-    background: var(--accent);
-  }
-  .app-title   { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.12em; color: #fff; text-transform: uppercase; }
-  .version-tag { font-size: 0.65rem; color: rgba(255,255,255,0.55); letter-spacing: 0.08em; font-weight: 600; }
+      --size-btn-height  : 60px;             /* Standard full-width button height */
+      --size-radius      : 12px;             /* Default card / button corner size */
+      --shadow-card      : 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.05);
+    }
 
-  /* ── Screens ── */
-  .screen {
-    display: none; flex-direction: column;
-    width: 100%; max-width: 480px;
-    padding: 16px 14px; gap: 12px; flex: 1;
-  }
-  .screen.active { display: flex; }
 
-  /* ── Cards ── */
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 16px;
-    box-shadow: var(--shadow);
-  }
-  .card-label {
-    font-size: 0.68rem; font-weight: 700; letter-spacing: 0.1em;
-    color: var(--muted); text-transform: uppercase; margin-bottom: 10px;
-  }
+    /* ============================================================
+       RESET / BASE
+       Minimal box-model normalisation.
+       ============================================================ */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent; /* Remove tap flash on mobile */
+    }
 
-  /* ── Big number ── */
-  .big-num { font-size: 4.4rem; font-weight: 800; line-height: 1; letter-spacing: -0.03em; }
-  .big-num.good { color: var(--accent2); }
-  .big-num.warn { color: var(--accent);  }
-  .big-num.bad  { color: var(--danger);  }
-  .big-sub { font-size: 0.72rem; font-weight: 600; color: var(--muted); letter-spacing: 0.06em; margin-top: 5px; }
+    body {
+      background  : var(--colour-bg);
+      color       : var(--colour-text);
+      font-family : 'Inter', 'Helvetica Neue', Arial, sans-serif;
+      min-height  : 100dvh;          /* Dynamic viewport height — accounts for mobile chrome */
+      display     : flex;
+      flex-direction : column;
+      align-items : center;
+    }
 
-  /* ── Stepper ── */
-  .stepper-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-  .stepper-label { font-size: 0.82rem; font-weight: 600; color: var(--text); flex: 1; }
-  .stepper-btns  { display: flex; gap: 8px; align-items: center; }
 
-  /* Tappable value — opens keypad */
-  .stepper-val {
-    font-size: 1.7rem; font-weight: 800; min-width: 56px; text-align: center;
-    color: var(--text);
-    background: var(--bg); border: 2px solid var(--border); border-radius: 8px;
-    padding: 6px 4px; cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
-    user-select: none; -webkit-user-select: none;
-  }
-  .stepper-val:active { border-color: var(--accent); color: var(--accent); }
-  .stepper-val.disabled-val { cursor: default; opacity: 0.4; }
+    /* ============================================================
+       BLOCK: header
+       Fixed app title bar spanning the full width at the top.
+       ============================================================ */
+    .header {
+      width      : 100%;
+      max-width  : 480px;
+      display    : flex;
+      align-items       : center;
+      justify-content   : space-between;
+      padding    : 16px 16px 12px;
+      background : var(--colour-green);      /* Lime green header bar */
+    }
 
-  /* ── Buttons ── */
-  .btn {
-    display: flex; align-items: center; justify-content: center;
-    border: none; border-radius: var(--radius); cursor: pointer;
-    font-family: inherit; font-weight: 700; letter-spacing: 0.04em;
-    transition: opacity 0.1s, transform 0.08s;
-    user-select: none; -webkit-user-select: none;
-  }
-  .btn:active { opacity: 0.78; transform: scale(0.96); }
+    /* header__title — application name in all-caps */
+    .header__title {
+      font-size      : 0.8rem;
+      font-weight    : 700;
+      letter-spacing : 0.12em;
+      color          : #fff;
+      text-transform : uppercase;
+    }
 
-  .btn-icon       { width: 52px; height: 52px; font-size: 1.5rem; background: var(--bg); color: var(--text); border: 2px solid var(--border); border-radius: 10px; }
-  .btn-icon.plus  { background: #eaf5ec; color: var(--accent2); border-color: #b6debb; }
-  .btn-icon.minus { background: #fceaea; color: var(--danger);  border-color: #f0b8b8; }
+    /* header__version — small semitransparent version stamp */
+    .header__version {
+      font-size      : 0.65rem;
+      font-weight    : 600;
+      letter-spacing : 0.08em;
+      color          : rgba(255,255,255,0.55);
+    }
 
-  .btn-primary       { height: var(--btn-h); width: 100%; font-size: 0.95rem; font-weight: 800; background: var(--accent); color: #fff; letter-spacing: 0.08em; text-transform: uppercase; border-radius: var(--radius); }
-  .btn-primary.green { background: var(--accent2); color: #fff; }
-  .btn-primary.red   { background: var(--danger);  color: #fff; }
-  .btn-primary.ghost { background: #fff; border: 2px solid var(--border); color: var(--muted); font-weight: 700; }
 
-  .btn-sm { height: 42px; padding: 0 16px; font-size: 0.78rem; font-weight: 700; background: var(--bg); color: var(--muted); border: 2px solid var(--border); border-radius: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+    /* ============================================================
+       BLOCK: screen
+       Full-width content panes. Only one is visible at a time.
+       JavaScript toggles screen--active to switch between them.
+       ============================================================ */
+    .screen {
+      display        : none;          /* Hidden by default                     */
+      flex-direction : column;
+      width          : 100%;
+      max-width      : 480px;
+      padding        : 16px 14px;
+      gap            : 12px;
+      flex           : 1;
+    }
 
-  /* ── Setup inputs ── */
-  .setup-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
-  .setup-row label { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+    /* screen--active — the currently displayed screen */
+    .screen--active {
+      display : flex;
+    }
 
-  /* ── Pip navigation bar ── */
-  .stop-bar { display: flex; gap: 5px; margin-bottom: 2px; }
-  .stop-pip {
-    flex: 1; height: 8px; border-radius: 4px; background: #d1d5db;
-    cursor: pointer; transition: background 0.2s, transform 0.1s;
-  }
-  .stop-pip:active            { transform: scaleY(1.4); }
-  .stop-pip.done              { background: #9ca3af; }
-  .stop-pip.current           { background: var(--accent); }
-  .stop-pip.future            { background: #d1d5db; }
-  .stop-pip.future.has-data   { background: #f0c89a; }
-  .stop-pip.terminus          { background: #e5e7eb; cursor: default; }
 
-  .pip-labels { display: flex; gap: 5px; margin-bottom: 5px; }
-  .pip-label  { flex: 1; text-align: center; font-size: 0.6rem; font-weight: 700; letter-spacing: 0.06em; color: var(--muted); }
-  .pip-label.current { color: var(--accent); }
+    /* ============================================================
+       BLOCK: card
+       White rounded panel with shadow. The primary layout
+       container for grouped content on each screen.
+       ============================================================ */
+    .card {
+      background    : var(--colour-panel);
+      border        : 1px solid var(--colour-border);
+      border-radius : var(--size-radius);
+      padding       : 16px;
+      box-shadow    : var(--shadow-card);
+    }
 
-  /* ── Banners ── */
-  .view-banner {
-    display: none; background: #fff7ee; border: 2px solid var(--accent);
-    border-radius: var(--radius); padding: 10px 14px;
-    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; color: var(--accent); text-align: center;
-  }
-  .view-banner.show { display: block; }
-  .past-banner {
-    display: none; background: #f9fafb; border: 2px solid #d1d5db;
-    border-radius: var(--radius); padding: 10px 14px;
-    font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; color: var(--muted); text-align: center;
-  }
-  .past-banner.show { display: block; }
+    /* card__label — small all-caps section label at the top of a card */
+    .card__label {
+      font-size      : 0.68rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      color          : var(--colour-muted);
+      text-transform : uppercase;
+      margin-bottom  : 10px;
+    }
 
-  /* ── Walk-on list ── */
-  .walkons-list { display: flex; flex-direction: column; gap: 6px; }
-  .walkon-item {
-    display: flex; align-items: center; justify-content: space-between;
-    background: #f9fafb; border: 1px solid var(--border);
-    border-radius: 8px; padding: 9px 12px; font-size: 0.8rem;
-  }
-  .wo-tag  { color: var(--accent2); font-weight: 800; }
-  .wo-dest { color: var(--muted); font-weight: 600; }
-  .wo-del  { color: var(--danger); font-size: 1.1rem; cursor: pointer; padding: 0 4px; font-weight: 700; }
+    /* card__label--flex — label row with inline right-side content (e.g. count tag) */
+    .card__label--flex {
+      display         : flex;
+      justify-content : space-between;
+      align-items     : center;
+    }
 
-  /* ── Modals (shared bottom-sheet style) ── */
-  .modal-overlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(0,0,0,0.5); z-index: 100;
-    align-items: flex-end; justify-content: center;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal-sheet {
-    background: var(--panel); border-top: 3px solid var(--accent);
-    border-radius: 16px 16px 0 0;
-    padding: 24px 20px 36px; width: 100%; max-width: 480px;
-    display: flex; flex-direction: column; gap: 14px;
-    box-shadow: 0 -4px 24px rgba(0,0,0,0.12);
-  }
-  .modal-title { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
+    /* card__divider — horizontal rule separating sub-sections within a card */
+    .card__divider {
+      height     : 1px;
+      background : var(--colour-border);
+      margin     : 12px 0;
+    }
 
-  /* Walk-on destination buttons */
-  .stop-selector { display: flex; gap: 8px; flex-wrap: wrap; }
-  .stop-btn {
-    flex: 1; min-width: 52px; height: 54px; font-size: 1rem; font-weight: 800;
-    background: var(--bg); border: 2px solid var(--border); border-radius: 10px;
-    color: var(--muted); cursor: pointer; font-family: inherit; transition: all 0.1s;
-  }
-  .stop-btn.selected { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .stop-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+    /* card__hint — small explanatory text beneath a control */
+    .card__hint {
+      font-size   : 0.68rem;
+      color       : var(--colour-muted);
+      margin-top  : 10px;
+    }
 
-  /* ── Keypad ── */
-  .keypad-display {
-    background: var(--bg); border: 2px solid var(--border); border-radius: 10px;
-    padding: 12px 16px; text-align: right;
-    font-size: 2.6rem; font-weight: 800; color: var(--accent);
-    letter-spacing: 0.02em; min-height: 68px;
-    display: flex; align-items: center; justify-content: flex-end;
-  }
-  .keypad-display .kp-label {
-    font-size: 0.62rem; font-weight: 700; color: var(--muted); letter-spacing: 0.1em;
-    text-transform: uppercase; margin-right: auto; align-self: flex-end; padding-bottom: 4px;
-  }
-  .keypad-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-  .kp-btn {
-    height: 62px; font-size: 1.5rem; font-weight: 700;
-    background: var(--bg); border: 2px solid var(--border);
-    border-radius: 10px; color: var(--text);
-    cursor: pointer; font-family: inherit;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 0.08s, transform 0.06s;
-    user-select: none; -webkit-user-select: none;
-  }
-  .kp-btn:active    { background: var(--border); transform: scale(0.94); }
-  .kp-btn.kp-del    { color: var(--danger); font-size: 1.3rem; }
-  .kp-btn.kp-zero   { grid-column: span 2; }
+    /* card__intro — introductory sentence above a grid or list */
+    .card__intro {
+      font-size   : 0.68rem;
+      font-weight : 500;
+      color       : var(--colour-muted);
+      line-height : 1.5;
+      margin-bottom : 8px;
+    }
 
-  /* ── Bulk walk-on confirm panel ── */
-  .wo-confirm-box {
-    background: #f0faf2; border: 2px solid var(--accent2);
-    border-radius: var(--radius); padding: 18px;
-    text-align: center;
-  }
-  .wo-confirm-big {
-    font-size: 2.4rem; font-weight: 800; color: var(--accent2); line-height: 1.1;
-  }
-  .wo-confirm-sub {
-    font-size: 0.78rem; font-weight: 600; color: var(--muted);
-    margin-top: 6px; line-height: 1.6;
-  }
 
-  /* ── Depart confirm ── */
-  .btn-primary.confirming {
-    background: var(--danger); color: #fff;
-    animation: pulse 0.6s ease infinite alternate;
-  }
-  @keyframes pulse { from { opacity:1; } to { opacity:0.72; } }
+    /* ============================================================
+       BLOCK: stepper
+       A labelled row containing a − value + control set.
+       Used for seat count, stop count, and booked passenger entry.
+       ============================================================ */
+    .stepper {
+      display         : flex;
+      align-items     : center;
+      justify-content : space-between;
+      gap             : 10px;
+    }
 
-  /* ── Summary table ── */
-  .summary-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-  .summary-table th {
-    text-align: left; color: var(--muted); font-size: 0.66rem; font-weight: 700;
-    letter-spacing: 0.1em; text-transform: uppercase;
-    padding: 6px 8px; border-bottom: 2px solid var(--border);
-  }
-  .summary-table td { padding: 9px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  .summary-table tr:last-child td { border-bottom: none; }
-  .td-stop { color: var(--accent); font-weight: 800; }
-  .td-num  { color: var(--text);   font-weight: 700; text-align: center; }
-  .td-wo   { color: var(--accent2);font-weight: 800; text-align: center; }
+    /* stepper__label — descriptive text on the left of the row */
+    .stepper__label {
+      font-size   : 0.82rem;
+      font-weight : 600;
+      color       : var(--colour-text);
+      flex        : 1;
+    }
 
-  /* ── Misc ── */
-  .divider { height: 1px; background: var(--border); margin: 12px 0; }
-  .row     { display: flex; gap: 10px; }
-  .row .btn { flex: 1; }
-  .mt-auto { margin-top: auto; }
-  .text-muted { color: var(--muted); font-size: 0.8rem; font-weight: 500; line-height: 1.5; }
-</style>
+    /* stepper__controls — wrapper around the − value + cluster */
+    .stepper__controls {
+      display     : flex;
+      gap         : 8px;
+      align-items : center;
+    }
+
+    /* stepper__value — the large tappable number in the centre.
+       Tapping it opens the numeric keypad for direct entry.
+       Coloured lime green to draw the eye to the live figure.    */
+    .stepper__value {
+      font-size          : 1.7rem;
+      font-weight        : 800;
+      min-width          : 56px;
+      text-align         : center;
+      color              : var(--colour-green);   /* Live figure — lime green */
+      background         : var(--colour-bg);
+      border             : 2px solid var(--colour-border);
+      border-radius      : 8px;
+      padding            : 6px 4px;
+      cursor             : pointer;
+      transition         : border-color 0.15s, color 0.15s;
+      user-select        : none;
+      -webkit-user-select: none;
+    }
+
+    .stepper__value:active {
+      border-color : var(--colour-accent);
+      color        : var(--colour-accent);
+    }
+
+    /* stepper__value--disabled — read-only on past stops */
+    .stepper__value--disabled {
+      cursor  : default;
+      opacity : 0.4;
+    }
+
+
+    /* ============================================================
+       BLOCK: btn
+       Base button styles. All buttons extend this block.
+       ============================================================ */
+    .btn {
+      display         : flex;
+      align-items     : center;
+      justify-content : center;
+      border          : none;
+      border-radius   : var(--size-radius);
+      cursor          : pointer;
+      font-family     : inherit;
+      font-weight     : 700;
+      letter-spacing  : 0.04em;
+      transition      : opacity 0.1s, transform 0.08s;
+      user-select        : none;
+      -webkit-user-select: none;
+    }
+
+    .btn:active {
+      opacity   : 0.78;
+      transform : scale(0.96);
+    }
+
+    /* btn--icon — square stepper ± button.
+       Greyscale: neutral background, dark grey icon, grey border.
+       Both + and − use identical greyscale styling so neither
+       implies positive/negative connotation through colour.       */
+    .btn--icon {
+      width         : 52px;
+      height        : 52px;
+      font-size     : 1.5rem;
+      background    : var(--colour-btn-grey-bg);
+      color         : var(--colour-btn-grey-icon);
+      border        : 2px solid var(--colour-btn-grey-border);
+      border-radius : 10px;
+    }
+
+    /* btn--primary — full-width action button (lime green default) */
+    .btn--primary {
+      height         : var(--size-btn-height);
+      width          : 100%;
+      font-size      : 0.95rem;
+      font-weight    : 800;
+      background     : var(--colour-accent);   /* Orange base; overridden by modifiers */
+      color          : #fff;
+      letter-spacing : 0.08em;
+      text-transform : uppercase;
+      border-radius  : var(--size-radius);
+    }
+
+    /* btn--primary--green — lime green action (start, depart, confirm) */
+    .btn--primary--green {
+      background : var(--colour-green);
+      color      : #fff;
+    }
+
+    /* btn--primary--red — destructive action (yes reset, etc.) */
+    .btn--primary--red {
+      background : var(--colour-danger);
+      color      : #fff;
+    }
+
+    /* btn--primary--ghost — secondary outline button (cancel, back) */
+    .btn--primary--ghost {
+      background   : #fff;
+      border       : 2px solid var(--colour-border);
+      color        : var(--colour-muted);
+      font-weight  : 700;
+    }
+
+    /* btn--primary--confirming — pulsing red state on first depart tap.
+       Applied by JavaScript; overrides the green resting state.        */
+    .btn--primary--confirming {
+      background : var(--colour-danger);
+      color      : #fff;
+      animation  : pulse 0.6s ease infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 1;    }
+      to   { opacity: 0.72; }
+    }
+
+    /* btn--secondary — smaller utility button (Add Walk-on, Reset Journey) */
+    .btn--secondary {
+      height         : 42px;
+      padding        : 0 16px;
+      font-size      : 0.78rem;
+      font-weight    : 700;
+      background     : var(--colour-bg);
+      color          : var(--colour-muted);
+      border         : 2px solid var(--colour-border);
+      border-radius  : 10px;
+      letter-spacing : 0.06em;
+      text-transform : uppercase;
+    }
+
+
+    /* ============================================================
+       BLOCK: pip-bar
+       Stop progress indicator at the top of the stop-view screen.
+       Each pip represents one stop and is colour-coded by status.
+       Tapping a pip navigates to that stop for viewing / editing.
+       ============================================================ */
+    .pip-bar {
+      display       : flex;
+      gap           : 5px;
+      margin-bottom : 2px;
+    }
+
+    /* pip-bar__labels — row of small stop labels above the pips */
+    .pip-bar__labels {
+      display       : flex;
+      gap           : 5px;
+      margin-bottom : 5px;
+    }
+
+    /* pip-bar__label — individual stop label (S1, S2 … END) */
+    .pip-bar__label {
+      flex           : 1;
+      text-align     : center;
+      font-size      : 0.6rem;
+      font-weight    : 700;
+      letter-spacing : 0.06em;
+      color          : var(--colour-muted);
+    }
+
+    /* pip-bar__label--viewing — highlights the currently viewed stop */
+    .pip-bar__label--viewing {
+      color : var(--colour-accent);
+    }
+
+    /* pip-bar__pip — the coloured segment representing one stop */
+    .pip-bar__pip {
+      flex          : 1;
+      height        : 8px;
+      border-radius : 4px;
+      background    : #d1d5db;           /* Default: future, no data   */
+      cursor        : pointer;
+      transition    : background 0.2s, transform 0.1s;
+    }
+
+    .pip-bar__pip:active { transform: scaleY(1.4); }
+
+    /* Status modifiers for individual pips */
+    .pip-bar__pip--done     { background: #9ca3af; }              /* Past stop (departed)     */
+    .pip-bar__pip--current  { background: var(--colour-accent); } /* Current active stop       */
+    .pip-bar__pip--future   { background: #d1d5db; }              /* Future stop, no data yet  */
+    .pip-bar__pip--has-data { background: #f0c89a; }              /* Future stop, pre-entered  */
+    .pip-bar__pip--terminus { background: #e5e7eb; cursor: default; } /* Final terminus stop   */
+
+
+    /* ============================================================
+       BLOCK: banner
+       Informational strip displayed when viewing a non-current stop.
+       ============================================================ */
+
+    /* banner--past — shown when viewing a previously departed stop */
+    .banner--past {
+      display       : none;
+      background    : #f9fafb;
+      border        : 2px solid #d1d5db;
+      border-radius : var(--size-radius);
+      padding       : 10px 14px;
+      font-size     : 0.75rem;
+      font-weight   : 700;
+      letter-spacing: 0.05em;
+      color         : var(--colour-muted);
+      text-align    : center;
+    }
+
+    /* banner--future — shown when viewing a stop ahead of the current one */
+    .banner--future {
+      display       : none;
+      background    : #fff7ee;
+      border        : 2px solid var(--colour-accent);
+      border-radius : var(--size-radius);
+      padding       : 10px 14px;
+      font-size     : 0.75rem;
+      font-weight   : 700;
+      letter-spacing: 0.05em;
+      color         : var(--colour-accent);
+      text-align    : center;
+    }
+
+    /* --visible modifier — added by JavaScript to show a banner */
+    .banner--past--visible   { display: block; }
+    .banner--future--visible { display: block; }
+
+
+    /* ============================================================
+       BLOCK: stop-header
+       The STOP X / TERMINUS heading row and on-board count.
+       ============================================================ */
+    .stop-header {
+      display         : flex;
+      align-items     : baseline;
+      justify-content : space-between;
+    }
+
+    .stop-header__stop-label {
+      font-size      : 0.68rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      color          : var(--colour-muted);
+      text-transform : uppercase;
+      margin-bottom  : 2px;
+    }
+
+    .stop-header__stop-name {
+      font-size      : 2rem;
+      font-weight    : 700;
+      letter-spacing : 0.04em;
+    }
+
+    .stop-header__onboard-label {
+      font-size      : 0.68rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      color          : var(--colour-muted);
+      text-transform : uppercase;
+      margin-bottom  : 2px;
+      text-align     : right;
+    }
+
+    .stop-header__onboard-num {
+      font-size   : 2rem;
+      font-weight : 700;
+      text-align  : right;
+    }
+
+
+    /* ============================================================
+       BLOCK: dest-grid
+       The per-destination availability tile grid.
+       Shows the minimum available seats across every leg of each
+       possible journey segment from the current stop to each
+       subsequent stop, so the driver can see at a glance how
+       many walk-ons can travel as far as each destination.
+       ============================================================ */
+    .dest-grid {
+      display               : grid;
+      grid-template-columns : repeat(auto-fit, minmax(80px, 1fr));
+      gap                   : 8px;
+      margin-top            : 2px;
+    }
+
+    /* dest-grid__tile — individual destination availability cell */
+    .dest-grid__tile {
+      background    : var(--colour-bg);
+      border        : 2px solid var(--colour-border);
+      border-radius : 10px;
+      padding       : 10px 6px 8px;
+      text-align    : center;
+    }
+
+    /* Availability colour modifiers for tiles */
+    .dest-grid__tile--good { border-color: #b6debb; background: #eaf5ec; }  /* >5 seats  */
+    .dest-grid__tile--warn { border-color: #fcd8a0; background: #fff7ee; }  /* 1–5 seats */
+    .dest-grid__tile--none { border-color: #e5e7eb; background: #f9fafb; opacity: 0.55; } /* 0 seats */
+
+    /* dest-grid__tile-stop — the stop label inside each tile */
+    .dest-grid__tile-stop {
+      font-size      : 0.58rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      text-transform : uppercase;
+      color          : var(--colour-muted);
+      margin-bottom  : 4px;
+    }
+
+    /* dest-grid__tile-num — the large seat count number */
+    .dest-grid__tile-num {
+      font-size   : 1.9rem;
+      font-weight : 800;
+      line-height : 1;
+    }
+
+    /* Number colour matches tile state */
+    .dest-grid__tile--good .dest-grid__tile-num { color: var(--colour-green);  }
+    .dest-grid__tile--warn .dest-grid__tile-num { color: var(--colour-accent); }
+    .dest-grid__tile--none .dest-grid__tile-num { color: var(--colour-muted);  }
+
+    /* dest-grid__tile-unit — "seat" / "seats" label below the number */
+    .dest-grid__tile-unit {
+      font-size      : 0.56rem;
+      font-weight    : 600;
+      color          : var(--colour-muted);
+      letter-spacing : 0.04em;
+      margin-top     : 3px;
+    }
+
+
+    /* ============================================================
+       BLOCK: walkon-list
+       The list of walk-on passenger entries within the walk-ons card.
+       Each entry shows the walk-on number and their alighting stop.
+       ============================================================ */
+    .walkon-list {
+      display        : flex;
+      flex-direction : column;
+      gap            : 6px;
+    }
+
+    /* walkon-list__item — a single walk-on entry row */
+    .walkon-list__item {
+      display         : flex;
+      align-items     : center;
+      justify-content : space-between;
+      background      : #f9fafb;
+      border          : 1px solid var(--colour-border);
+      border-radius   : 8px;
+      padding         : 9px 12px;
+      font-size       : 0.8rem;
+    }
+
+    /* walkon-list__item-tag — the "WALK-ON #N" label in green */
+    .walkon-list__item-tag {
+      color       : var(--colour-green);
+      font-weight : 800;
+    }
+
+    /* walkon-list__item-dest — the alighting stop label in muted text */
+    .walkon-list__item-dest {
+      color       : var(--colour-muted);
+      font-weight : 600;
+    }
+
+    /* walkon-list__item-remove — the ✕ delete button in red */
+    .walkon-list__item-remove {
+      color       : var(--colour-danger);
+      font-size   : 1.1rem;
+      font-weight : 700;
+      cursor      : pointer;
+      padding     : 0 4px;
+    }
+
+    /* walkon-list__empty — placeholder text when no walk-ons are recorded */
+    .walkon-list__empty {
+      font-size : 0.72rem;
+      color     : var(--colour-muted);
+      padding   : 4px 0;
+    }
+
+    /* walkon-list__count-tag — inline count badge ("3 added") in the card label */
+    .walkon-list__count-tag {
+      color       : var(--colour-green);
+      font-weight : 700;
+    }
+
+
+    /* ============================================================
+       BLOCK: modal
+       Full-screen overlay with a bottom-sheet panel.
+       Used for the walk-on destination picker, bulk confirm,
+       numeric keypad, and reset confirmation.
+       ============================================================ */
+    .modal {
+      display         : none;          /* Hidden until JavaScript adds --open   */
+      position        : fixed;
+      inset           : 0;
+      background      : rgba(0,0,0,0.5);
+      z-index         : 100;
+      align-items     : flex-end;
+      justify-content : center;
+    }
+
+    /* modal--open — added by JavaScript to show the overlay */
+    .modal--open { display: flex; }
+
+    /* modal__sheet — the white panel that slides up from the bottom */
+    .modal__sheet {
+      background    : var(--colour-panel);
+      border-top    : 3px solid var(--colour-accent);
+      border-radius : 16px 16px 0 0;
+      padding       : 24px 20px 36px;
+      width         : 100%;
+      max-width     : 480px;
+      display       : flex;
+      flex-direction: column;
+      gap           : 14px;
+      box-shadow    : 0 -4px 24px rgba(0,0,0,0.12);
+    }
+
+    /* modal__title — small all-caps label at the top of each sheet */
+    .modal__title {
+      font-size      : 0.72rem;
+      font-weight    : 800;
+      letter-spacing : 0.12em;
+      color          : var(--colour-muted);
+      text-transform : uppercase;
+    }
+
+    /* modal__text — body copy inside a modal (e.g. reset warning) */
+    .modal__text {
+      color       : var(--colour-muted);
+      font-size   : 0.8rem;
+      font-weight : 500;
+      line-height : 1.5;
+    }
+
+    /* modal__btn-row — side-by-side button pair inside a modal */
+    .modal__btn-row {
+      display : flex;
+      gap     : 10px;
+    }
+
+    .modal__btn-row .btn { flex: 1; }
+
+
+    /* ============================================================
+       BLOCK: stop-selector
+       Grid of stop-destination buttons inside the walk-on modal.
+       ============================================================ */
+    .stop-selector {
+      display   : flex;
+      gap       : 8px;
+      flex-wrap : wrap;
+    }
+
+    /* stop-selector__btn — individual destination choice button */
+    .stop-selector__btn {
+      flex          : 1;
+      min-width     : 52px;
+      height        : 54px;
+      font-size     : 1rem;
+      font-weight   : 800;
+      background    : var(--colour-bg);
+      border        : 2px solid var(--colour-border);
+      border-radius : 10px;
+      color         : var(--colour-muted);
+      cursor        : pointer;
+      font-family   : inherit;
+      transition    : all 0.1s;
+    }
+
+    /* stop-selector__btn--selected — highlighted when a destination is chosen */
+    .stop-selector__btn--selected {
+      background   : var(--colour-accent);
+      color        : #fff;
+      border-color : var(--colour-accent);
+    }
+
+    .stop-selector__btn:disabled {
+      opacity : 0.25;
+      cursor  : not-allowed;
+    }
+
+
+    /* ============================================================
+       BLOCK: wo-confirm
+       Confirmation box shown when adding multiple walk-ons at once.
+       ============================================================ */
+    .wo-confirm {
+      background    : #f0faf2;
+      border        : 2px solid var(--colour-green);
+      border-radius : var(--size-radius);
+      padding       : 18px;
+      text-align    : center;
+    }
+
+    /* wo-confirm__count — the large "N walk-ons" heading */
+    .wo-confirm__count {
+      font-size   : 2.4rem;
+      font-weight : 800;
+      color       : var(--colour-green);
+      line-height : 1.1;
+    }
+
+    /* wo-confirm__detail — the destination and instruction sub-text */
+    .wo-confirm__detail {
+      font-size   : 0.78rem;
+      font-weight : 600;
+      color       : var(--colour-muted);
+      margin-top  : 6px;
+      line-height : 1.6;
+    }
+
+
+    /* ============================================================
+       BLOCK: keypad
+       Numeric entry pad used for direct-input of seat counts,
+       stop counts, booked boarders / alighters, and walk-on qty.
+       ============================================================ */
+
+    /* keypad__display — shows the number being typed */
+    .keypad__display {
+      background     : var(--colour-bg);
+      border         : 2px solid var(--colour-border);
+      border-radius  : 10px;
+      padding        : 12px 16px;
+      text-align     : right;
+      font-size      : 2.6rem;
+      font-weight    : 800;
+      color          : var(--colour-accent);
+      letter-spacing : 0.02em;
+      min-height     : 68px;
+      display        : flex;
+      align-items    : center;
+      justify-content: flex-end;
+    }
+
+    /* keypad__display-label — small hint text on the left of the display */
+    .keypad__display-label {
+      font-size      : 0.62rem;
+      font-weight    : 700;
+      color          : var(--colour-muted);
+      letter-spacing : 0.1em;
+      text-transform : uppercase;
+      margin-right   : auto;
+      align-self     : flex-end;
+      padding-bottom : 4px;
+    }
+
+    /* keypad__grid — 3-column digit button layout */
+    .keypad__grid {
+      display               : grid;
+      grid-template-columns : repeat(3, 1fr);
+      gap                   : 8px;
+    }
+
+    /* keypad__btn — individual digit / delete key */
+    .keypad__btn {
+      height          : 62px;
+      font-size       : 1.5rem;
+      font-weight     : 700;
+      background      : var(--colour-bg);
+      border          : 2px solid var(--colour-border);
+      border-radius   : 10px;
+      color           : var(--colour-text);
+      cursor          : pointer;
+      font-family     : inherit;
+      display         : flex;
+      align-items     : center;
+      justify-content : center;
+      transition      : background 0.08s, transform 0.06s;
+      user-select        : none;
+      -webkit-user-select: none;
+    }
+
+    .keypad__btn:active {
+      background : var(--colour-border);
+      transform  : scale(0.94);
+    }
+
+    /* keypad__btn--zero — spans two columns for the 0 key */
+    .keypad__btn--zero { grid-column: span 2; }
+
+    /* keypad__btn--delete — backspace key styled in red */
+    .keypad__btn--delete { color: var(--colour-danger); font-size: 1.3rem; }
+
+
+    /* ============================================================
+       BLOCK: summary-table
+       Post-journey data table shown on the terminus screen.
+       Columns: Stop | Booked+ | Booked− | Walk-ons | Avail | Board
+       ============================================================ */
+    .summary-table {
+      width           : 100%;
+      border-collapse : collapse;
+      font-size       : 0.82rem;
+    }
+
+    .summary-table th {
+      text-align     : left;
+      color          : var(--colour-muted);
+      font-size      : 0.66rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      text-transform : uppercase;
+      padding        : 6px 8px;
+      border-bottom  : 2px solid var(--colour-border);
+    }
+
+    .summary-table td {
+      padding        : 9px 8px;
+      border-bottom  : 1px solid var(--colour-border);
+      vertical-align : top;
+    }
+
+    .summary-table tr:last-child td { border-bottom: none; }
+
+    /* summary-table__cell--stop — stop name column in orange */
+    .summary-table__cell--stop {
+      color       : var(--colour-accent);
+      font-weight : 800;
+    }
+
+    /* summary-table__cell--num — numeric columns, centred */
+    .summary-table__cell--num {
+      color       : var(--colour-text);
+      font-weight : 700;
+      text-align  : center;
+    }
+
+    /* summary-table__cell--wo — walk-on column highlighted in green */
+    .summary-table__cell--wo {
+      color       : var(--colour-green);
+      font-weight : 800;
+      text-align  : center;
+    }
+
+
+    /* ============================================================
+       UTILITY CLASSES
+       Single-purpose helpers used sparingly in the HTML.
+       ============================================================ */
+
+    /* u-row — side-by-side flex row (e.g. button pairs) */
+    .u-row {
+      display : flex;
+      gap     : 10px;
+    }
+
+    .u-row .btn { flex: 1; }
+
+    /* u-push-top — pushes element to the bottom of a flex column */
+    .u-push-top {
+      margin-top : auto;
+    }
+
+    /* u-action-stack — vertically stacked action buttons at screen bottom */
+    .u-action-stack {
+      display        : flex;
+      flex-direction : column;
+      gap            : 10px;
+      padding-top    : 6px;
+    }
+
+    /* u-terminus-header — centred journey-complete heading */
+    .u-terminus-header {
+      text-align : center;
+      padding    : 10px 0 4px;
+    }
+
+    .u-terminus-header__label {
+      font-size      : 0.68rem;
+      font-weight    : 700;
+      letter-spacing : 0.1em;
+      color          : var(--colour-muted);
+      text-transform : uppercase;
+      margin-bottom  : 4px;
+    }
+
+    .u-terminus-header__word {
+      font-size   : 2rem;
+      font-weight : 700;
+      color       : var(--colour-green);
+    }
+
+    /* u-terminus-card — centred card used for the final passenger total */
+    .u-terminus-card {
+      text-align : center;
+    }
+
+    .u-terminus-card__num {
+      font-size      : 4.4rem;
+      font-weight    : 800;
+      line-height    : 1;
+      letter-spacing : -0.03em;
+      color          : var(--colour-accent);
+    }
+
+    .u-terminus-card__sub {
+      font-size      : 0.72rem;
+      font-weight    : 600;
+      color          : var(--colour-muted);
+      letter-spacing : 0.06em;
+      margin-top     : 5px;
+    }
+  </style>
 </head>
 <body>
 
-<div class="app-header">
-  <span class="app-title">Walk-on Calculator</span>
-  <span class="version-tag">v1.5</span>
-</div>
+<!-- ============================================================
+     HEADER BAR
+     Persistent lime-green bar with application title and version.
+     ============================================================ -->
+<header class="header">
+  <span class="header__title">Walk-on Calculator</span>
+  <span class="header__version">v1.8</span>
+</header>
 
-<!-- ══════════════════════════════════════════
+
+<!-- ============================================================
      SCREEN 1 — SETUP
-══════════════════════════════════════════ -->
-<div class="screen active" id="screen-setup">
+     Displayed on launch and after a reset. The driver configures
+     total available seats and the number of stops for this run,
+     then taps Start Journey to begin the active stop view.
+     ============================================================ -->
+<main class="screen screen--active" id="screen-setup" role="main" aria-label="Journey setup">
 
+  <!-- Coach capacity card — set total available seats (default 49) -->
   <div class="card">
-    <div class="card-label">Coach Capacity</div>
-    <div class="stepper-row">
-      <span class="stepper-label">Total seats available</span>
-      <div class="stepper-btns">
-        <button class="btn btn-icon minus" onclick="adjSetup('seats',-1)">−</button>
-        <span class="stepper-val" id="seats-val" onclick="openKeypad('seats',1,99,'Total Seats')">49</span>
-        <button class="btn btn-icon plus"  onclick="adjSetup('seats',+1)">+</button>
+    <div class="card__label">Coach Capacity</div>
+    <div class="stepper">
+      <span class="stepper__label">Total seats available</span>
+      <div class="stepper__controls">
+        <button class="btn btn--icon" aria-label="Decrease seat count" onclick="adjSetup('seats', -1)">−</button>
+        <span   class="stepper__value" id="seats-val"
+                title="Tap to enter directly"
+                onclick="openKeypad('seats', 1, 99, 'Total Seats')">49</span>
+        <button class="btn btn--icon" aria-label="Increase seat count" onclick="adjSetup('seats', +1)">+</button>
       </div>
     </div>
   </div>
 
+  <!-- Number of stops card — set how many stops on this run (2–10).
+       The final stop is always the terminus; boarding is disabled there. -->
   <div class="card">
-    <div class="card-label">Number of Stops</div>
-    <div class="stepper-row">
-      <span class="stepper-label">Stops on this run</span>
-      <div class="stepper-btns">
-        <button class="btn btn-icon minus" onclick="adjSetup('stops',-1)">−</button>
-        <span class="stepper-val" id="stops-val" onclick="openKeypad('stops',2,5,'No. of Stops')">4</span>
-        <button class="btn btn-icon plus"  onclick="adjSetup('stops',+1)">+</button>
+    <div class="card__label">Number of Stops</div>
+    <div class="stepper">
+      <span class="stepper__label">Stops on this run</span>
+      <div class="stepper__controls">
+        <button class="btn btn--icon" aria-label="Decrease stop count" onclick="adjSetup('stops', -1)">−</button>
+        <span   class="stepper__value" id="stops-val"
+                title="Tap to enter directly"
+                onclick="openKeypad('stops', 2, 10, 'No. of Stops')">4</span>
+        <button class="btn btn--icon" aria-label="Increase stop count" onclick="adjSetup('stops', +1)">+</button>
       </div>
     </div>
-    <div style="font-size:0.68rem;color:var(--muted);margin-top:10px;">
-      Min 2 · Max 5 &nbsp;·&nbsp; Final stop = terminus (no boarding)
-    </div>
+    <p class="card__hint">Min 2 · Max 10 &nbsp;·&nbsp; Final stop = terminus (no boarding)</p>
   </div>
 
-  <button class="btn btn-primary green" onclick="startJourney()">▶ START JOURNEY</button>
+  <!-- Start button — initialises the journey state and switches to the stop view -->
+  <button class="btn btn--primary btn--primary--green" onclick="startJourney()">▶ START JOURNEY</button>
 
-</div>
+</main>
 
-<!-- ══════════════════════════════════════════
+
+<!-- ============================================================
      SCREEN 2 — STOP VIEW
-══════════════════════════════════════════ -->
-<div class="screen" id="screen-stop">
+     The main working screen, displayed one stop at a time.
+     The driver enters booked boarders / alighters from the
+     company app, adds any walk-on passengers with their
+     destination stops, then taps Depart to advance.
+     ============================================================ -->
+<main class="screen" id="screen-stop" role="main" aria-label="Active stop view">
 
-  <div class="pip-labels" id="pip-labels"></div>
-  <div class="stop-bar"   id="stop-bar"></div>
+  <!-- Pip navigation labels — S1, S2 … END -->
+  <div class="pip-bar__labels" id="pip-labels" aria-hidden="true"></div>
 
-  <div class="past-banner"  id="past-banner">◀ PAST STOP — VIEW ONLY · TAP AMBER PIP TO RETURN</div>
-  <div class="view-banner"  id="future-banner">▶ FUTURE STOP — PRE-ENTER FIGURES · TAP AMBER PIP TO RETURN</div>
+  <!-- Pip navigation bar — colour-coded stop progress track.
+       Tapping a pip jumps to that stop for viewing or pre-entry. -->
+  <div class="pip-bar" id="stop-bar" role="navigation" aria-label="Stop navigation"></div>
 
-  <!-- Stop heading -->
-  <div style="display:flex;align-items:baseline;justify-content:space-between;">
+  <!-- Past-stop banner — shown when the driver reviews a departed stop (read-only) -->
+  <div class="banner--past" id="past-banner" role="status">
+    ◀ PAST STOP — VIEW ONLY · TAP AMBER PIP TO RETURN
+  </div>
+
+  <!-- Future-stop banner — shown when the driver pre-enters data for an upcoming stop -->
+  <div class="banner--future" id="future-banner" role="status">
+    ▶ FUTURE STOP — PRE-ENTER FIGURES · TAP AMBER PIP TO RETURN
+  </div>
+
+  <!-- Stop heading — current stop name and running on-board total -->
+  <div class="stop-header">
     <div>
-      <div class="card-label" style="margin-bottom:2px;">Viewing Stop</div>
-      <div style="font-size:2rem;font-weight:700;letter-spacing:0.04em;" id="stop-heading">STOP 1</div>
+      <div class="stop-header__stop-label">Viewing Stop</div>
+      <div class="stop-header__stop-name" id="stop-heading">STOP 1</div>
     </div>
-    <div style="text-align:right;">
-      <div class="card-label" style="margin-bottom:2px;">On Board</div>
-      <div style="font-size:2rem;font-weight:700;" id="onboard-num">0</div>
+    <div>
+      <div class="stop-header__onboard-label">On Board</div>
+      <div class="stop-header__onboard-num" id="onboard-num">0</div>
     </div>
   </div>
 
-  <!-- Seats available -->
-  <div class="card" style="text-align:center;padding:20px 16px;" id="avail-card">
-    <div class="card-label">Seats Available for Walk-ons</div>
-    <div class="big-num good" id="avail-num">49</div>
-    <div class="big-sub"      id="avail-sub">of 49 total seats</div>
+  <!-- Destination availability card — tile grid showing how many seats remain
+       free for the full journey to each possible destination stop.
+       Each tile value is the minimum available seats across every leg
+       of the segment from the current stop to that destination.          -->
+  <div class="card" id="dest-avail-card">
+    <div class="card__label">Seats Available — By Destination</div>
+    <p class="card__intro" id="dest-avail-intro">
+      How many seats remain free all the way to each stop:
+    </p>
+    <div class="dest-grid" id="dest-avail-grid" aria-live="polite"></div>
   </div>
 
-  <!-- Booked passengers -->
+  <!-- Booked passengers card — enter boarders and alighters from the company app.
+       Two steppers: one for passengers joining at this stop, one for those leaving.
+       Interaction is disabled on past stops (read-only view). -->
   <div class="card" id="booked-card">
-    <div class="card-label">Booked Passengers (from app)</div>
-    <div class="stepper-row">
-      <span class="stepper-label">Boarding this stop</span>
-      <div class="stepper-btns">
-        <button class="btn btn-icon minus" id="btn-bb-minus" onclick="adjBooked('board',-1)">−</button>
-        <span   class="stepper-val"        id="booked-board-val"
+    <div class="card__label">Booked Passengers (from app)</div>
+
+    <!-- Boarded this stop -->
+    <div class="stepper">
+      <span class="stepper__label">Boarding this stop</span>
+      <div class="stepper__controls">
+        <button class="btn btn--icon" id="btn-bb-minus" aria-label="Decrease boarders" onclick="adjBooked('board', -1)">−</button>
+        <span   class="stepper__value" id="booked-board-val"
                 onclick="kpBookedTap('board')">0</span>
-        <button class="btn btn-icon plus"  id="btn-bb-plus"  onclick="adjBooked('board',+1)">+</button>
+        <button class="btn btn--icon" id="btn-bb-plus"  aria-label="Increase boarders" onclick="adjBooked('board', +1)">+</button>
       </div>
     </div>
-    <div class="divider"></div>
-    <div class="stepper-row">
-      <span class="stepper-label">Alighting this stop</span>
-      <div class="stepper-btns">
-        <button class="btn btn-icon minus" id="btn-ba-minus" onclick="adjBooked('alight',-1)">−</button>
-        <span   class="stepper-val"        id="booked-alight-val"
+
+    <div class="card__divider"></div>
+
+    <!-- Alighted this stop -->
+    <div class="stepper">
+      <span class="stepper__label">Alighting this stop</span>
+      <div class="stepper__controls">
+        <button class="btn btn--icon" id="btn-ba-minus" aria-label="Decrease alighters" onclick="adjBooked('alight', -1)">−</button>
+        <span   class="stepper__value" id="booked-alight-val"
                 onclick="kpBookedTap('alight')">0</span>
-        <button class="btn btn-icon plus"  id="btn-ba-plus"  onclick="adjBooked('alight',+1)">+</button>
+        <button class="btn btn--icon" id="btn-ba-plus"  aria-label="Increase alighters" onclick="adjBooked('alight', +1)">+</button>
       </div>
     </div>
   </div>
 
-  <!-- Walk-ons -->
+  <!-- Walk-ons card — lists walk-on passengers boarded at this stop.
+       Each entry records a unique ID and the passenger's alighting stop.
+       The walk-on is automatically removed from the seat count when
+       their destination is reached during the journey.               -->
   <div class="card" id="walkon-card">
-    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center;">
+    <div class="card__label card__label--flex">
       <span>Walk-ons Boarding</span>
-      <span id="walkon-count-tag" style="color:var(--accent2);font-weight:700;"></span>
+      <span class="walkon-list__count-tag" id="walkon-count-tag"></span>
     </div>
-    <div class="walkons-list" id="walkons-list"></div>
-    <button class="btn btn-sm" style="width:100%;margin-top:10px;" id="add-walkon-btn" onclick="openAddWalkon()">
+    <div class="walkon-list" id="walkons-list" aria-live="polite"></div>
+    <button class="btn btn--secondary" style="width:100%; margin-top:10px;"
+            id="add-walkon-btn" onclick="openAddWalkon()">
       ＋ Add Walk-on
     </button>
   </div>
 
-  <!-- Depart / Reset -->
-  <div class="mt-auto" style="display:flex;flex-direction:column;gap:10px;padding-top:6px;">
-    <button class="btn btn-primary" id="depart-btn" onclick="departStop()">DEPART STOP →</button>
-    <button class="btn btn-sm ghost btn" style="width:100%;" onclick="confirmReset()">↺ RESET JOURNEY</button>
+  <!-- Action area — Depart button (lime green, double-tap guarded) and Reset -->
+  <div class="u-push-top u-action-stack">
+    <button class="btn btn--primary btn--primary--green" id="depart-btn" onclick="departStop()">
+      DEPART STOP →
+    </button>
+    <button class="btn btn--secondary" style="width:100%;" onclick="confirmReset()">
+      ↺ RESET JOURNEY
+    </button>
   </div>
 
-</div>
+</main>
 
-<!-- ══════════════════════════════════════════
+
+<!-- ============================================================
      SCREEN 3 — TERMINUS
-══════════════════════════════════════════ -->
-<div class="screen" id="screen-terminus">
+     Shown when the coach arrives at the final stop. Displays
+     total passengers on board and a per-stop summary table.
+     ============================================================ -->
+<main class="screen" id="screen-terminus" role="main" aria-label="Journey terminus">
 
-  <div style="text-align:center;padding:10px 0 4px;">
-    <div class="card-label" style="margin-bottom:4px;">Journey Complete</div>
-    <div style="font-size:2rem;font-weight:700;color:var(--accent2);">TERMINUS</div>
+  <!-- Journey complete heading -->
+  <div class="u-terminus-header">
+    <div class="u-terminus-header__label">Journey Complete</div>
+    <div class="u-terminus-header__word">TERMINUS</div>
   </div>
 
-  <div class="card" style="text-align:center;">
-    <div class="card-label">Passengers Arrived</div>
-    <div class="big-num" id="terminus-onboard" style="color:var(--accent);">0</div>
-    <div class="big-sub">on board at destination</div>
+  <!-- Final passenger total card -->
+  <div class="card u-terminus-card">
+    <div class="card__label">Passengers Arrived</div>
+    <div class="u-terminus-card__num" id="terminus-onboard">0</div>
+    <div class="u-terminus-card__sub">on board at destination</div>
   </div>
 
+  <!-- Journey summary table — one row per active stop showing:
+       Bk+ (booked boarders) | Bk− (booked alighters) |
+       WO+ (walk-ons)        | Avail (seats at departure) | Board (total after departure) -->
   <div class="card">
-    <div class="card-label">Journey Summary</div>
-    <table class="summary-table">
+    <div class="card__label">Journey Summary</div>
+    <table class="summary-table" aria-label="Per-stop journey summary">
       <thead>
         <tr>
           <th>Stop</th>
-          <th style="text-align:center;">Bk+</th>
-          <th style="text-align:center;">Bk−</th>
-          <th style="text-align:center;">WO+</th>
-          <th style="text-align:center;">Avail</th>
-          <th style="text-align:center;">Board</th>
+          <th style="text-align:center;" title="Booked boarders">Bk+</th>
+          <th style="text-align:center;" title="Booked alighters">Bk−</th>
+          <th style="text-align:center;" title="Walk-ons boarded">WO+</th>
+          <th style="text-align:center;" title="Seats available at departure">Avail</th>
+          <th style="text-align:center;" title="Total on board after departure">Board</th>
         </tr>
       </thead>
       <tbody id="summary-tbody"></tbody>
     </table>
   </div>
 
-  <button class="btn btn-primary" onclick="resetJourney()">↺ NEW JOURNEY</button>
+  <!-- Return to setup for a new journey -->
+  <button class="btn btn--primary" onclick="resetJourney()">↺ NEW JOURNEY</button>
 
-</div>
+</main>
 
-<!-- ══════════════════════════════════════════
-     MODAL — ADD WALK-ON
-══════════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-walkon">
-  <div class="modal-sheet">
-    <div class="modal-title">Walk-on — Alighting at Stop:</div>
+
+<!-- ============================================================
+     MODAL — ADD WALK-ON (Step 1: destination picker)
+     The driver selects which stop the walk-on is travelling to.
+     Buttons are generated dynamically for each valid future stop.
+     The terminus stop is labelled "Terminus" rather than "Stop N".
+     ============================================================ -->
+<div class="modal" id="modal-walkon" role="dialog" aria-modal="true" aria-label="Select walk-on destination">
+  <div class="modal__sheet">
+    <div class="modal__title">Walk-on — Alighting at Stop:</div>
     <div class="stop-selector" id="dest-stop-selector"></div>
-    <div class="row">
-      <button class="btn btn-primary ghost" onclick="closeAddWalkon()">Cancel</button>
-      <button class="btn btn-primary green" onclick="confirmAddWalkon()">Next →</button>
+    <div class="modal__btn-row">
+      <button class="btn btn--primary btn--primary--ghost" onclick="closeAddWalkon()">Cancel</button>
+      <button class="btn btn--primary btn--primary--green" onclick="confirmAddWalkon()">Next →</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════
-     MODAL — BULK WALK-ON CONFIRM
-══════════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-wo-confirm">
-  <div class="modal-sheet">
-    <div class="modal-title">Confirm Walk-ons</div>
-    <div class="wo-confirm-box">
-      <div class="wo-confirm-big" id="woc-big"></div>
-      <div class="wo-confirm-sub" id="woc-sub"></div>
+
+<!-- ============================================================
+     MODAL — BULK WALK-ON CONFIRM (Step 3: qty > 1 confirmation)
+     Shown when adding more than one walk-on at the same time.
+     Summarises the quantity and shared destination before adding.
+     ============================================================ -->
+<div class="modal" id="modal-wo-confirm" role="dialog" aria-modal="true" aria-label="Confirm walk-on group">
+  <div class="modal__sheet">
+    <div class="modal__title">Confirm Walk-ons</div>
+    <div class="wo-confirm">
+      <div class="wo-confirm__count"  id="woc-big"></div>
+      <div class="wo-confirm__detail" id="woc-sub"></div>
     </div>
-    <div class="row">
-      <button class="btn btn-primary ghost" onclick="cancelWoConfirm()">◀ Change</button>
-      <button class="btn btn-primary green" onclick="finaliseWalkons()">✓ Add All</button>
+    <div class="modal__btn-row">
+      <button class="btn btn--primary btn--primary--ghost" onclick="cancelWoConfirm()">◀ Change</button>
+      <button class="btn btn--primary btn--primary--green" onclick="finaliseWalkons()">✓ Add All</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════
-     MODAL — KEYPAD
-══════════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-keypad">
-  <div class="modal-sheet">
-    <div class="modal-title" id="kp-title">Enter value</div>
-    <div class="keypad-display">
-      <span class="kp-label" id="kp-label"></span>
+
+<!-- ============================================================
+     MODAL — NUMERIC KEYPAD
+     Shared direct-entry keypad used by multiple controls:
+     · Setup: total seats, number of stops
+     · Stop view: booked boarders, booked alighters
+     · Walk-on flow: quantity of walk-ons boarding together
+     The min / max range and a callback function are set by
+     the calling code so the keypad is context-aware.
+     ============================================================ -->
+<div class="modal" id="modal-keypad" role="dialog" aria-modal="true" aria-label="Numeric entry">
+  <div class="modal__sheet">
+    <div class="modal__title" id="kp-title">Enter value</div>
+
+    <!-- Display area showing the number being typed -->
+    <div class="keypad__display">
+      <span class="keypad__display-label" id="kp-label"></span>
       <span id="kp-display">0</span>
     </div>
-    <div class="keypad-grid">
-      <button class="kp-btn" onclick="kpDigit('1')">1</button>
-      <button class="kp-btn" onclick="kpDigit('2')">2</button>
-      <button class="kp-btn" onclick="kpDigit('3')">3</button>
-      <button class="kp-btn" onclick="kpDigit('4')">4</button>
-      <button class="kp-btn" onclick="kpDigit('5')">5</button>
-      <button class="kp-btn" onclick="kpDigit('6')">6</button>
-      <button class="kp-btn" onclick="kpDigit('7')">7</button>
-      <button class="kp-btn" onclick="kpDigit('8')">8</button>
-      <button class="kp-btn" onclick="kpDigit('9')">9</button>
-      <button class="kp-btn kp-zero"    onclick="kpDigit('0')">0</button>
-      <button class="kp-btn kp-del"     onclick="kpDelete()">⌫</button>
-      <!-- Confirm spans full width on its own row -->
+
+    <!-- 3×3 digit grid + 0 (spans 2) and ⌫ (delete) -->
+    <div class="keypad__grid">
+      <button class="keypad__btn" onclick="kpDigit('1')">1</button>
+      <button class="keypad__btn" onclick="kpDigit('2')">2</button>
+      <button class="keypad__btn" onclick="kpDigit('3')">3</button>
+      <button class="keypad__btn" onclick="kpDigit('4')">4</button>
+      <button class="keypad__btn" onclick="kpDigit('5')">5</button>
+      <button class="keypad__btn" onclick="kpDigit('6')">6</button>
+      <button class="keypad__btn" onclick="kpDigit('7')">7</button>
+      <button class="keypad__btn" onclick="kpDigit('8')">8</button>
+      <button class="keypad__btn" onclick="kpDigit('9')">9</button>
+      <button class="keypad__btn keypad__btn--zero"   onclick="kpDigit('0')">0</button>
+      <button class="keypad__btn keypad__btn--delete" onclick="kpDelete()" aria-label="Delete">⌫</button>
     </div>
-    <div class="row" style="margin-top:2px;">
-      <button class="btn btn-primary ghost" onclick="closeKeypad()">Cancel</button>
-      <button class="btn btn-primary green" onclick="kpConfirm()">✓ SET</button>
+
+    <!-- Confirm / cancel row -->
+    <div class="modal__btn-row" style="margin-top:2px;">
+      <button class="btn btn--primary btn--primary--ghost" onclick="closeKeypad()">Cancel</button>
+      <button class="btn btn--primary btn--primary--green" onclick="kpConfirm()">✓ SET</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════
-     MODAL — RESET CONFIRM
-══════════════════════════════════════════ -->
-<div class="modal-overlay" id="modal-reset">
-  <div class="modal-sheet">
-    <div class="modal-title">Reset Journey?</div>
-    <p class="text-muted">This will clear all data and return to the setup screen.</p>
-    <div class="row">
-      <button class="btn btn-primary ghost" onclick="closeReset()">Cancel</button>
-      <button class="btn btn-primary red"   onclick="resetJourney()">Yes, Reset</button>
+
+<!-- ============================================================
+     MODAL — RESET CONFIRMATION
+     Shown when the driver taps ↺ Reset Journey. Requires an
+     explicit second tap to prevent accidental data loss.
+     ============================================================ -->
+<div class="modal" id="modal-reset" role="dialog" aria-modal="true" aria-label="Confirm journey reset">
+  <div class="modal__sheet">
+    <div class="modal__title">Reset Journey?</div>
+    <p class="modal__text">This will clear all data and return to the setup screen.</p>
+    <div class="modal__btn-row">
+      <button class="btn btn--primary btn--primary--ghost" onclick="closeReset()">Cancel</button>
+      <button class="btn btn--primary btn--primary--red"   onclick="resetJourney()">Yes, Reset</button>
     </div>
   </div>
 </div>
 
-<!-- ══════════════════════════════════════════
+
+<!-- ============================================================
      JAVASCRIPT
-══════════════════════════════════════════ -->
+     All application logic in a single <script> block.
+     No external dependencies. ES6 only.
+
+     STRUCTURE
+     ─────────
+     1. Application state
+     2. Keypad state
+     3. Setup helpers    — adjSetup, startJourney
+     4. Pip bar          — buildPipBar, updatePipBar, pipTapped
+     5. Core render      — renderStopView
+     6. Calculations     — calcOnBoardAt, walkonsOnBoardAt,
+                           calcAvailAt, calcAvailToStop,
+                           calcAvailAtProjected
+     7. Dest-grid render — renderDestAvailGrid
+     8. Booked steppers  — adjBooked, kpBookedTap
+     9. Walk-on list     — renderWalkonList, removeWalkon
+    10. Add walk-on flow — openAddWalkon, closeAddWalkon,
+                           confirmAddWalkon, cancelWoConfirm,
+                           finaliseWalkons
+    11. Keypad           — openKeypad, kpDigit, kpDelete,
+                           kpConfirm, closeKeypad
+    12. Depart           — departStop, resetDepartBtn
+    13. Terminus         — showTerminus
+    14. Reset            — confirmReset, closeReset, resetJourney
+    15. Screen switch    — showScreen
+     ============================================================ -->
 <script>
-// ── State ──────────────────────────────────────────────────────────────────
-let totalSeats    = 49;
-let numStops      = 4;
-let currentStop   = 0;
-let viewingStop   = 0;
-let stops         = [];   // per-stop: { bookedBoard, bookedAlight, walkons[], departed, onBoardAfter }
-let walkonIdSeq   = 0;
-let selectedDest  = null;
-let woQtyPending  = 0;    // how many walk-ons queued in the multi-add flow
-let departPending = false;
-let departTimer   = null;
 
-// ── Keypad state ───────────────────────────────────────────────────────────
-let kpBuffer  = '';       // current digit string being built
-let kpMin     = 0;
-let kpMax     = 99;
-let kpTarget  = null;     // function called on confirm: receives integer value
+  /* ==========================================================
+     1. APPLICATION STATE
+     All mutable journey data lives here. These variables are
+     reset by startJourney() and resetJourney().
+     ========================================================== */
 
-// ── Setup helpers ──────────────────────────────────────────────────────────
-function adjSetup(field, delta) {
-  if (field === 'seats') {
-    totalSeats = Math.max(1, Math.min(99, totalSeats + delta));
-    document.getElementById('seats-val').textContent = totalSeats;
-  } else {
-    numStops = Math.max(2, Math.min(5, numStops + delta));
-    document.getElementById('stops-val').textContent = numStops;
+  let totalSeats    = 49;     // Configurable total available seats (default 49)
+  let numStops      = 4;      // Total stops including terminus (min 2, max 10)
+  let currentStop   = 0;      // Index of the stop the coach is currently at
+  let viewingStop   = 0;      // Index of the stop currently displayed on screen
+                              //   (may differ from currentStop when reviewing past/future)
+
+  // stops[] — one entry per stop, initialised by startJourney().
+  // Shape: { bookedBoard: int, bookedAlight: int, walkons: WalkOn[], departed: bool }
+  // WalkOn shape: { id: int, boardedAt: int, alightAt: int }
+  let stops         = [];
+
+  let walkonIdSeq   = 0;      // Auto-incrementing ID for walk-on records
+  let selectedDest  = null;   // Walk-on destination stop index chosen in modal Step 1
+  let woQtyPending  = 0;      // Walk-on quantity held between keypad and bulk-confirm steps
+  let departPending = false;  // True after the first Depart tap; awaits second confirmation
+  let departTimer   = null;   // setTimeout handle — resets Depart button after 3 s if untapped
+
+
+  /* ==========================================================
+     2. KEYPAD STATE
+     Shared between all keypad invocations. Reset each time
+     openKeypad() is called.
+     ========================================================== */
+
+  let kpBuffer  = '';         // Digit string currently being built (e.g. "1", "12")
+  let kpMin     = 0;          // Minimum acceptable value for this invocation
+  let kpMax     = 99;         // Maximum acceptable value for this invocation
+  let kpTarget  = null;       // Callback function called with the confirmed integer value
+  let kpLegacy  = null;       // 'seats' | 'stops' | null — for setup-screen direct fields
+
+
+  /* ==========================================================
+     3. SETUP HELPERS
+     ========================================================== */
+
+  /**
+   * adjSetup — increment or decrement a setup field by delta (±1).
+   * Called by the ± stepper buttons on the setup screen.
+   * @param {'seats'|'stops'} field  — which field to adjust
+   * @param {number}          delta  — +1 or −1
+   */
+  function adjSetup(field, delta) {
+    if (field === 'seats') {
+      totalSeats = Math.max(1, Math.min(99, totalSeats + delta));
+      document.getElementById('seats-val').textContent = totalSeats;
+    } else {
+      numStops = Math.max(2, Math.min(10, numStops + delta));
+      document.getElementById('stops-val').textContent = numStops;
+    }
   }
-}
 
-function startJourney() {
-  const v = parseInt(document.getElementById('seats-val').textContent, 10);
-  if (isNaN(v) || v < 1) { alert('Please enter a valid seat count.'); return; }
-  totalSeats  = v;
-  currentStop = 0;
-  viewingStop = 0;
-  walkonIdSeq = 0;
-  departPending = false;
+  /**
+   * startJourney — read setup values, initialise the stops array,
+   * build the pip bar, and switch to the stop-view screen.
+   */
+  function startJourney() {
+    const v = parseInt(document.getElementById('seats-val').textContent, 10);
+    if (isNaN(v) || v < 1) {
+      alert('Please enter a valid seat count.');
+      return;
+    }
 
-  stops = [];
-  for (let i = 0; i < numStops; i++) {
-    stops.push({ bookedBoard: 0, bookedAlight: 0, walkons: [], departed: false });
+    // Initialise journey state
+    totalSeats    = v;
+    currentStop   = 0;
+    viewingStop   = 0;
+    walkonIdSeq   = 0;
+    departPending = false;
+
+    // Create one state object per stop
+    stops = [];
+    for (let i = 0; i < numStops; i++) {
+      stops.push({ bookedBoard: 0, bookedAlight: 0, walkons: [], departed: false });
+    }
+
+    buildPipBar();
+    showScreen('screen-stop');
+    renderStopView();
   }
 
-  buildPipBar();
-  showScreen('screen-stop');
-  renderStopView();
-}
 
-// ── Pip bar ────────────────────────────────────────────────────────────────
-function buildPipBar() {
-  const bar    = document.getElementById('stop-bar');
-  const labels = document.getElementById('pip-labels');
-  bar.innerHTML    = '';
-  labels.innerHTML = '';
+  /* ==========================================================
+     4. PIP BAR
+     The coloured stop-progress track beneath the header.
+     ========================================================== */
 
-  for (let i = 0; i < numStops; i++) {
-    const lbl = document.createElement('div');
-    lbl.className   = 'pip-label';
-    lbl.id          = `lbl-${i}`;
-    lbl.textContent = (i === numStops - 1) ? 'END' : `S${i + 1}`;
-    labels.appendChild(lbl);
+  /**
+   * buildPipBar — create the pip and label DOM elements for each stop.
+   * Called once per journey when startJourney() runs.
+   */
+  function buildPipBar() {
+    const bar    = document.getElementById('stop-bar');
+    const labels = document.getElementById('pip-labels');
+    bar.innerHTML    = '';
+    labels.innerHTML = '';
 
-    const pip = document.createElement('div');
-    pip.className = 'stop-pip';
-    pip.id        = `pip-${i}`;
-    const idx = i;
-    pip.addEventListener('click', () => pipTapped(idx));
-    bar.appendChild(pip);
+    for (let i = 0; i < numStops; i++) {
+
+      // Label above the pip — "S1", "S2" … "END" for terminus
+      const lbl = document.createElement('div');
+      lbl.className   = 'pip-bar__label';
+      lbl.id          = `lbl-${i}`;
+      lbl.textContent = (i === numStops - 1) ? 'END' : `S${i + 1}`;
+      labels.appendChild(lbl);
+
+      // Pip segment — tapping navigates to that stop
+      const pip = document.createElement('div');
+      pip.className = 'pip-bar__pip';
+      pip.id        = `pip-${i}`;
+      const idx = i;
+      pip.addEventListener('click', () => pipTapped(idx));
+      bar.appendChild(pip);
+    }
   }
-}
 
-function updatePipBar() {
-  for (let i = 0; i < numStops; i++) {
-    const pip  = document.getElementById(`pip-${i}`);
-    const lbl  = document.getElementById(`lbl-${i}`);
-    if (!pip) continue;
+  /**
+   * updatePipBar — refresh all pip and label classes to reflect
+   * the current journey position and which stop is being viewed.
+   * Called by renderStopView() on every render.
+   */
+  function updatePipBar() {
+    for (let i = 0; i < numStops; i++) {
+      const pip = document.getElementById(`pip-${i}`);
+      const lbl = document.getElementById(`lbl-${i}`);
+      if (!pip) continue;
 
-    const isTerminus = (i === numStops - 1);
-    const isPast     = i < currentStop;
-    const isCurrent  = i === currentStop;
-    const isFuture   = i > currentStop && !isTerminus;
-    const hasData    = stops[i] && (stops[i].bookedBoard > 0 || stops[i].bookedAlight > 0 || stops[i].walkons.length > 0);
+      const isTerminus = (i === numStops - 1);
+      const isPast     = i < currentStop;
+      const isCurrent  = i === currentStop;
+      const isFuture   = i > currentStop && !isTerminus;
+      const hasData    = stops[i] && (
+        stops[i].bookedBoard  > 0 ||
+        stops[i].bookedAlight > 0 ||
+        stops[i].walkons.length > 0
+      );
 
-    pip.className = 'stop-pip' + (
-      isTerminus ? ' terminus' :
-      isPast     ? ' done'    :
-      isCurrent  ? ' current' :
-      isFuture   ? ' future' + (hasData ? ' has-data' : '') : ''
-    );
-    lbl.className = 'pip-label' + (i === viewingStop ? ' current' : '');
+      // Apply exactly one status modifier to the pip
+      pip.className = 'pip-bar__pip' + (
+        isTerminus           ? ' pip-bar__pip--terminus'                         :
+        isPast               ? ' pip-bar__pip--done'                             :
+        isCurrent            ? ' pip-bar__pip--current'                         :
+        isFuture && hasData  ? ' pip-bar__pip--future pip-bar__pip--has-data'   :
+                               ' pip-bar__pip--future'
+      );
+
+      // Highlight the label of whichever stop is currently being viewed
+      lbl.className = 'pip-bar__label' + (i === viewingStop ? ' pip-bar__label--viewing' : '');
+    }
   }
-}
 
-function pipTapped(idx) {
-  if (idx === numStops - 1) return;
-  if (idx === viewingStop)  return;
-  viewingStop = idx;
-  renderStopView();
-}
+  /**
+   * pipTapped — navigate the view to a different stop when the driver
+   * taps a pip. The terminus pip is non-interactive.
+   * @param {number} idx — stop index of the tapped pip
+   */
+  function pipTapped(idx) {
+    if (idx === numStops - 1) return;  // Terminus pip is inert
+    if (idx === viewingStop)  return;  // Already viewing this stop
+    viewingStop = idx;
+    renderStopView();
+  }
 
-// ── Core render ────────────────────────────────────────────────────────────
-function renderStopView() {
-  const s          = stops[viewingStop];
-  const isPast     = viewingStop < currentStop;
-  const isCurrent  = viewingStop === currentStop;
-  const isFuture   = viewingStop > currentStop;
-  const isTerminus = viewingStop === numStops - 1;
 
-  updatePipBar();
+  /* ==========================================================
+     5. CORE RENDER
+     renderStopView() is the single re-render entry point.
+     Every user interaction that changes state calls this.
+     ========================================================== */
 
-  document.getElementById('past-banner').className   = 'past-banner'  + (isPast   ? ' show' : '');
-  document.getElementById('future-banner').className = 'view-banner'  + (isFuture ? ' show' : '');
+  /**
+   * renderStopView — update the entire stop-view screen to reflect
+   * the current viewingStop and all accumulated journey data.
+   */
+  function renderStopView() {
+    const s          = stops[viewingStop];
+    const isPast     = viewingStop < currentStop;
+    const isCurrent  = viewingStop === currentStop;
+    const isFuture   = viewingStop > currentStop;
+    const isTerminus = viewingStop === numStops - 1;
 
-  document.getElementById('stop-heading').textContent =
-    isTerminus ? 'TERMINUS' : `STOP ${viewingStop + 1}`;
-  document.getElementById('onboard-num').textContent = calcOnBoardAt(viewingStop);
+    // Refresh the pip bar colours and viewing-stop label highlight
+    updatePipBar();
 
-  // Avail card
-  const availCard = document.getElementById('avail-card');
-  if (isTerminus) {
-    availCard.style.display = 'none';
-  } else {
-    availCard.style.display = '';
+    // Show / hide the past / future context banners
+    const pastBanner   = document.getElementById('past-banner');
+    const futureBanner = document.getElementById('future-banner');
+    pastBanner.className   = 'banner--past'   + (isPast   ? ' banner--past--visible'   : '');
+    futureBanner.className = 'banner--future' + (isFuture ? ' banner--future--visible' : '');
+
+    // Update stop heading and running on-board total
+    document.getElementById('stop-heading').textContent =
+      isTerminus ? 'TERMINUS' : `STOP ${viewingStop + 1}`;
+    document.getElementById('onboard-num').textContent = calcOnBoardAt(viewingStop);
+
+    // Render the per-destination availability tile grid
+    renderDestAvailGrid();
+
+    // Booked passengers card — hide on terminus; disable controls on past stops
+    const bookedCard = document.getElementById('booked-card');
+    if (isTerminus) {
+      bookedCard.style.display = 'none';
+    } else {
+      bookedCard.style.display = '';
+      const bbv = document.getElementById('booked-board-val');
+      const bav = document.getElementById('booked-alight-val');
+      bbv.textContent = s.bookedBoard;
+      bav.textContent = s.bookedAlight;
+
+      // Disable ± buttons and keypad tap on past stops (view-only)
+      const dis = isPast;
+      ['btn-bb-minus','btn-bb-plus','btn-ba-minus','btn-ba-plus'].forEach(id => {
+        document.getElementById(id).disabled = dis;
+      });
+      bbv.classList.toggle('stepper__value--disabled', dis);
+      bav.classList.toggle('stepper__value--disabled', dis);
+      bbv.onclick = dis ? null : () => kpBookedTap('board');
+      bav.onclick = dis ? null : () => kpBookedTap('alight');
+    }
+
+    // Walk-ons card — hide on terminus; hide Add button on past stops
+    const walkonCard = document.getElementById('walkon-card');
+    if (isTerminus) {
+      walkonCard.style.display = 'none';
+    } else {
+      walkonCard.style.display = '';
+      renderWalkonList(isPast);
+      const avail  = calcAvailAt(viewingStop);
+      const addBtn = document.getElementById('add-walkon-btn');
+      addBtn.disabled      = isPast || avail <= 0;
+      addBtn.style.display = isPast ? 'none' : '';
+    }
+
+    // Depart button — only shown when viewing the current (not past/future) stop
+    resetDepartBtn();
+    const departBtn = document.getElementById('depart-btn');
+    departBtn.style.display = (isCurrent && !isTerminus) ? '' : 'none';
+    if (isCurrent) {
+      departBtn.textContent =
+        (currentStop === numStops - 2) ? 'ARRIVE TERMINUS →' : 'DEPART STOP →';
+    }
+  }
+
+
+  /* ==========================================================
+     6. CALCULATIONS
+     Pure functions over the stops[] state array.
+     ========================================================== */
+
+  /**
+   * calcOnBoardAt — total passengers physically on the coach
+   * as it arrives at stop idx, before any boarding or alighting
+   * at that stop takes place.
+   * Includes both booked passengers and walk-ons still travelling.
+   * @param  {number} idx — stop index
+   * @return {number}
+   */
+  function calcOnBoardAt(idx) {
+    let total = 0;
+
+    // Net booked passengers from all previous stops
+    for (let i = 0; i < idx; i++) {
+      total += stops[i].bookedBoard - stops[i].bookedAlight;
+    }
+
+    // Walk-ons from all previous stops whose destination is at or beyond idx
+    for (let i = 0; i < idx; i++) {
+      stops[i].walkons.forEach(w => {
+        if (w.alightAt >= idx) total++;
+      });
+    }
+
+    return Math.max(0, total);
+  }
+
+  /**
+   * walkonsOnBoardAt — count of walk-on passengers still on the coach
+   * as it arrives at stop idx (i.e. boarded before idx, not yet alighted).
+   * @param  {number} idx — stop index
+   * @return {number}
+   */
+  function walkonsOnBoardAt(idx) {
+    let count = 0;
+    for (let i = 0; i < idx; i++) {
+      stops[i].walkons.forEach(w => {
+        if (w.alightAt >= idx) count++;
+      });
+    }
+    return count;
+  }
+
+  /**
+   * calcAvailAt — seats available for walk-ons at stop idx.
+   * Accounts for booked passengers boarding and alighting at this stop,
+   * walk-ons already on board, and walk-ons boarding at this stop.
+   * This is the "current stop" figure used to cap new walk-on additions.
+   * @param  {number} idx — stop index
+   * @return {number}
+   */
+  function calcAvailAt(idx) {
+    const onBoard      = calcOnBoardAt(idx);
+    const bookedBoard  = stops[idx].bookedBoard;
+    const bookedAlight = stops[idx].bookedAlight;
+    const woBoarding   = stops[idx].walkons.filter(w => w.boardedAt === idx).length;
+    const woOnBoard    = walkonsOnBoardAt(idx);
+    const taken        = onBoard + bookedBoard - bookedAlight + woOnBoard + woBoarding;
+    return Math.max(0, totalSeats - taken);
+  }
+
+  /**
+   * calcAvailToStop — how many seats remain continuously available
+   * for a walk-on boarding at boardIdx and travelling all the way
+   * to destIdx.  Returns the minimum available capacity across every
+   * stop in the segment [boardIdx, destIdx).
+   *
+   * This is the value shown in the destination-availability tiles.
+   * A walk-on can only be guaranteed a seat to destIdx if this value > 0.
+   *
+   * @param  {number} boardIdx — stop where the walk-on boards
+   * @param  {number} destIdx  — stop where the walk-on alights
+   * @return {number}          — minimum seats across all legs
+   */
+  function calcAvailToStop(boardIdx, destIdx) {
+    let minAvail = Infinity;
+    for (let s = boardIdx; s < destIdx; s++) {
+      const avail = calcAvailAtProjected(s, boardIdx);
+      if (avail < minAvail) minAvail = avail;
+    }
+    return Math.max(0, minAvail === Infinity ? 0 : minAvail);
+  }
+
+  /**
+   * calcAvailAtProjected — available seats at stop s, projected forward
+   * with all currently-known data, but treating walk-ons boarding at
+   * boardIdx as the "candidate" group not yet committed.
+   *
+   * This avoids double-counting walk-ons already added at boardIdx
+   * when computing forward capacity from that stop.
+   *
+   * @param  {number} s        — the stop to evaluate capacity at
+   * @param  {number} boardIdx — the boarding stop of the candidate walk-on
+   * @return {number}
+   */
+  function calcAvailAtProjected(s, boardIdx) {
+    let onBoard = 0;
+
+    // Net booked passengers accumulated from stop 0 up to (but not including) stop s
+    for (let i = 0; i < s; i++) {
+      onBoard += stops[i].bookedBoard - stops[i].bookedAlight;
+    }
+
+    // Walk-ons from stops before s that are still on board (excluding boardIdx group)
+    for (let i = 0; i < s; i++) {
+      stops[i].walkons.forEach(w => {
+        if (w.alightAt >= s) onBoard++;
+      });
+    }
+
+    // Walk-ons who boarded at boardIdx and are still on board at stop s
+    // (these are already-confirmed entries, not the new candidate)
+    stops[boardIdx].walkons.forEach(w => {
+      if (w.boardedAt === boardIdx && w.alightAt >= s) onBoard++;
+    });
+
+    // Booked passengers boarding and alighting at stop s itself
+    onBoard += stops[s].bookedBoard - stops[s].bookedAlight;
+
+    // Walk-ons boarding at stop s (when s is not the boarding stop itself)
+    if (s !== boardIdx) {
+      stops[s].walkons.forEach(w => {
+        if (w.boardedAt === s) onBoard++;
+      });
+    }
+
+    return Math.max(0, totalSeats - onBoard);
+  }
+
+
+  /* ==========================================================
+     7. DESTINATION-GRID RENDER
+     Builds the per-destination availability tile grid.
+     ========================================================== */
+
+  /**
+   * renderDestAvailGrid — populate the dest-grid with one tile
+   * per reachable destination from the current viewingStop.
+   * Tiles are colour-coded: good (>5), warn (1–5), none (0).
+   */
+  function renderDestAvailGrid() {
+    const card       = document.getElementById('dest-avail-card');
+    const grid       = document.getElementById('dest-avail-grid');
+    const s          = viewingStop;
+    const isTerminus = s === numStops - 1;
+
+    // Hide the card on the terminus stop or on single-segment journeys
+    if (isTerminus || numStops <= 2) {
+      card.style.display = 'none';
+      return;
+    }
+
+    card.style.display = '';
+    grid.innerHTML     = '';
+
+    // Generate one tile for each possible destination
+    for (let dest = s + 1; dest < numStops; dest++) {
+      const isTermDest = dest === numStops - 1;
+      const avail      = calcAvailToStop(s, dest);
+
+      // Tile colour class based on seat availability
+      const modifier = avail <= 0 ? 'none' : avail <= 5 ? 'warn' : 'good';
+      const label    = isTermDest ? 'Terminus' : `Stop ${dest + 1}`;
+
+      const tile = document.createElement('div');
+      tile.className = `dest-grid__tile dest-grid__tile--${modifier}`;
+      tile.innerHTML = `
+        <div class="dest-grid__tile-stop">${label}</div>
+        <div class="dest-grid__tile-num">${avail}</div>
+        <div class="dest-grid__tile-unit">seat${avail === 1 ? '' : 's'}</div>`;
+      grid.appendChild(tile);
+    }
+  }
+
+
+  /* ==========================================================
+     8. BOOKED STEPPERS
+     ========================================================== */
+
+  /**
+   * adjBooked — increment or decrement the booked boarders or
+   * alighters for the currently viewed stop.
+   * @param {'board'|'alight'} type  — which field to adjust
+   * @param {number}           delta — +1 or −1
+   */
+  function adjBooked(type, delta) {
+    const s = stops[viewingStop];
+    if (type === 'board') {
+      s.bookedBoard = Math.max(0, s.bookedBoard + delta);
+    } else {
+      // Cap alighters at the number currently on board to prevent negative totals
+      const maxAlight = calcOnBoardAt(viewingStop);
+      s.bookedAlight  = Math.max(0, Math.min(maxAlight, s.bookedAlight + delta));
+    }
+    renderStopView();
+  }
+
+  /**
+   * kpBookedTap — open the keypad for direct entry of booked
+   * boarders or alighters. Called when the driver taps the value
+   * display in the stepper.
+   * @param {'board'|'alight'} type
+   */
+  function kpBookedTap(type) {
+    if (viewingStop < currentStop) return;  // Read-only on past stops
+    if (type === 'board') {
+      openKeypad(null, 0, totalSeats, 'Boarding This Stop', val => {
+        stops[viewingStop].bookedBoard = val;
+        renderStopView();
+      });
+    } else {
+      const maxAlight = calcOnBoardAt(viewingStop);
+      openKeypad(null, 0, maxAlight, 'Alighting This Stop', val => {
+        stops[viewingStop].bookedAlight = val;
+        renderStopView();
+      });
+    }
+  }
+
+
+  /* ==========================================================
+     9. WALK-ON LIST
+     ========================================================== */
+
+  /**
+   * renderWalkonList — rebuild the walk-on list DOM for the current
+   * viewingStop. Shows all walk-ons that boarded at this stop.
+   * @param {boolean} isPast — whether this is a read-only past stop
+   */
+  function renderWalkonList(isPast) {
+    const s      = stops[viewingStop];
+    const list   = document.getElementById('walkons-list');
+    const tag    = document.getElementById('walkon-count-tag');
+
+    // Only show walk-ons who boarded at this particular stop
+    const active = s.walkons.filter(w => w.boardedAt === viewingStop);
+
+    // Update the inline count badge in the card header
+    tag.textContent = active.length ? `${active.length} added` : '';
+    list.innerHTML  = '';
+
+    if (active.length === 0) {
+      // Show a placeholder message when no walk-ons have been recorded
+      list.innerHTML = `<div class="walkon-list__empty">
+        ${isPast ? 'None boarded at this stop' : 'None added yet'}
+      </div>`;
+      return;
+    }
+
+    // Render one list item per walk-on, numbered sequentially from the display index
+    active.forEach((wo, idx) => {
+      const item = document.createElement('div');
+      item.className = 'walkon-list__item';
+      item.innerHTML = `
+        <span class="walkon-list__item-tag">WALK-ON #${idx + 1}</span>
+        <span class="walkon-list__item-dest">→ Alights Stop ${wo.alightAt + 1}</span>
+        ${isPast ? '' : `<span class="walkon-list__item-remove"
+          onclick="removeWalkon(${wo.id})" aria-label="Remove walk-on ${idx + 1}">✕</span>`}`;
+      list.appendChild(item);
+    });
+  }
+
+  /**
+   * removeWalkon — delete a walk-on record by its unique ID.
+   * @param {number} id — the internal walk-on ID (not the display index)
+   */
+  function removeWalkon(id) {
+    stops[viewingStop].walkons = stops[viewingStop].walkons.filter(w => w.id !== id);
+    renderStopView();
+  }
+
+
+  /* ==========================================================
+     10. ADD WALK-ON FLOW  (3-step modal sequence)
+
+     Step 1 — openAddWalkon    : destination picker modal
+     Step 2 — confirmAddWalkon : keypad for quantity (via openKeypad callback)
+     Step 3 — finaliseWalkons  : add all records (or bulk-confirm for qty > 1)
+     ========================================================== */
+
+  /**
+   * openAddWalkon (Step 1) — show the destination picker sheet.
+   * Generates a button for each valid future stop (the current stop
+   * and past stops are excluded; the terminus is labelled "Terminus").
+   */
+  function openAddWalkon() {
+    if (calcAvailAt(viewingStop) <= 0) return;   // No seats left
+    selectedDest = null;
+    woQtyPending = 0;
+
+    // Build destination buttons for every stop after the current one
+    const sel = document.getElementById('dest-stop-selector');
+    sel.innerHTML = '';
+    for (let i = viewingStop + 1; i < numStops; i++) {
+      const btn = document.createElement('button');
+      btn.className   = 'stop-selector__btn';
+      btn.textContent = (i === numStops - 1) ? 'Terminus' : `Stop ${i + 1}`;
+      btn.onclick = () => {
+        // Deselect all, then mark this one as chosen
+        document.querySelectorAll('#dest-stop-selector .stop-selector__btn')
+          .forEach(b => b.classList.remove('stop-selector__btn--selected'));
+        btn.classList.add('stop-selector__btn--selected');
+        selectedDest = i;
+      };
+      sel.appendChild(btn);
+    }
+
+    document.getElementById('modal-walkon').classList.add('modal--open');
+  }
+
+  /** closeAddWalkon — dismiss the destination picker without adding anyone */
+  function closeAddWalkon() {
+    document.getElementById('modal-walkon').classList.remove('modal--open');
+  }
+
+  /**
+   * confirmAddWalkon (Step 2) — destination chosen; open keypad for quantity.
+   * The keypad max is capped at the number of available seats.
+   */
+  function confirmAddWalkon() {
+    if (selectedDest === null) {
+      alert('Please select a destination stop.');
+      return;
+    }
+    closeAddWalkon();
+
     const avail = calcAvailAt(viewingStop);
-    const el    = document.getElementById('avail-num');
-    el.textContent = avail;
-    el.className   = 'big-num ' + (avail <= 0 ? 'bad' : avail <= 5 ? 'warn' : 'good');
-    document.getElementById('avail-sub').textContent = `of ${totalSeats} total seats`;
+
+    openKeypad(null, 1, avail, `How many? (max ${avail})`, qty => {
+      woQtyPending = qty;
+
+      if (qty === 1) {
+        // Single walk-on — commit immediately, no extra confirmation needed
+        finaliseWalkons();
+      } else {
+        // Multiple walk-ons — show a confirmation panel before committing
+        const destLabel = (selectedDest === numStops - 1) ? 'Terminus' : `Stop ${selectedDest + 1}`;
+        document.getElementById('woc-big').textContent = `${qty} walk-ons`;
+        document.getElementById('woc-sub').textContent =
+          `All alighting at ${destLabel}.\nTap "Add All" to confirm, or "Change" to go back.`;
+        document.getElementById('modal-wo-confirm').classList.add('modal--open');
+      }
+    });
   }
 
-  // Booked card
-  const bookedCard = document.getElementById('booked-card');
-  if (isTerminus) {
-    bookedCard.style.display = 'none';
-  } else {
-    bookedCard.style.display = '';
-    const bbv = document.getElementById('booked-board-val');
-    const bav = document.getElementById('booked-alight-val');
-    bbv.textContent = s.bookedBoard;
-    bav.textContent = s.bookedAlight;
+  /**
+   * cancelWoConfirm — "Change" tapped on the bulk-confirm sheet.
+   * Discards the pending quantity and returns to the destination picker.
+   */
+  function cancelWoConfirm() {
+    document.getElementById('modal-wo-confirm').classList.remove('modal--open');
+    woQtyPending = 0;
+    openAddWalkon();
+  }
 
-    // Disable interaction on past stops
-    const dis = isPast;
-    ['btn-bb-minus','btn-bb-plus','btn-ba-minus','btn-ba-plus'].forEach(id => {
-      document.getElementById(id).disabled = dis;
-    });
-    bbv.classList.toggle('disabled-val', dis);
-    bav.classList.toggle('disabled-val', dis);
-    if (dis) {
-      bbv.onclick = null;
-      bav.onclick = null;
-    } else {
-      bbv.onclick = () => kpBookedTap('board');
-      bav.onclick = () => kpBookedTap('alight');
+  /**
+   * finaliseWalkons (Step 3) — commit all pending walk-on records
+   * to the current stop's walkons array, then re-render.
+   * Each walk-on gets its own unique ID for independent removal.
+   */
+  function finaliseWalkons() {
+    document.getElementById('modal-wo-confirm').classList.remove('modal--open');
+    for (let i = 0; i < woQtyPending; i++) {
+      walkonIdSeq++;
+      stops[viewingStop].walkons.push({
+        id       : walkonIdSeq,
+        boardedAt: viewingStop,
+        alightAt : selectedDest
+      });
     }
+    woQtyPending = 0;
+    renderStopView();
   }
 
-  // Walk-on card
-  const walkonCard = document.getElementById('walkon-card');
-  if (isTerminus) {
-    walkonCard.style.display = 'none';
-  } else {
-    walkonCard.style.display = '';
-    renderWalkonList(isPast);
-    const avail  = calcAvailAt(viewingStop);
-    const addBtn = document.getElementById('add-walkon-btn');
-    addBtn.disabled     = isPast || avail <= 0;
-    addBtn.style.display = isPast ? 'none' : '';
+
+  /* ==========================================================
+     11. KEYPAD
+     Shared numeric entry pad. openKeypad() is called with
+     a min, max, label, and callback. kpConfirm() clamps the
+     entered value to [min, max] and fires the callback.
+     ========================================================== */
+
+  /**
+   * openKeypad — open the numeric keypad modal.
+   * @param {'seats'|'stops'|null} legacyField — if non-null, sets a setup variable directly
+   * @param {number}   min         — minimum accepted value
+   * @param {number}   max         — maximum accepted value
+   * @param {string}   labelText   — hint text shown inside the display
+   * @param {Function} callbackFn  — called with the confirmed integer (when legacyField is null)
+   */
+  function openKeypad(legacyField, min, max, labelText, callbackFn) {
+    kpBuffer = '';
+    kpMin    = min;
+    kpMax    = max;
+    kpTarget = callbackFn || null;
+    kpLegacy = legacyField;
+
+    document.getElementById('kp-title').textContent   = 'Enter value';
+    document.getElementById('kp-label').textContent   = labelText || '';
+    document.getElementById('kp-display').textContent = '—';
+    document.getElementById('modal-keypad').classList.add('modal--open');
   }
 
-  // Depart button
-  resetDepartBtn();
-  const departBtn = document.getElementById('depart-btn');
-  departBtn.style.display = (isCurrent && !isTerminus) ? '' : 'none';
-  if (isCurrent) {
-    departBtn.textContent = (currentStop === numStops - 2) ? 'ARRIVE TERMINUS →' : 'DEPART STOP →';
+  /**
+   * kpDigit — append a digit to the keypad buffer.
+   * Limited to 2 digits (max value 99). Leading zeros stripped.
+   * @param {string} d — the digit character tapped ('0'–'9')
+   */
+  function kpDigit(d) {
+    if (kpBuffer.length >= 2) kpBuffer = kpBuffer.slice(1); // Shift out oldest digit
+    kpBuffer += d;
+    kpBuffer  = String(parseInt(kpBuffer, 10));              // Strip any leading zero
+    document.getElementById('kp-display').textContent = kpBuffer || '0';
   }
-}
 
-// ── Calculations ───────────────────────────────────────────────────────────
-function calcOnBoardAt(idx) {
-  let total = 0;
-  for (let i = 0; i < idx; i++) {
-    const s = stops[i];
-    total += s.bookedBoard - s.bookedAlight;
+  /** kpDelete — remove the last digit from the keypad buffer */
+  function kpDelete() {
+    kpBuffer = kpBuffer.slice(0, -1);
+    document.getElementById('kp-display').textContent = kpBuffer || '—';
   }
-  for (let i = 0; i < idx; i++) {
-    stops[i].walkons.forEach(w => { if (w.alightAt >= idx) total++; });
-  }
-  return Math.max(0, total);
-}
 
-function walkonsOnBoardAt(idx) {
-  let count = 0;
-  for (let i = 0; i < idx; i++) {
-    stops[i].walkons.forEach(w => { if (w.alightAt >= idx) count++; });
-  }
-  return count;
-}
+  /**
+   * kpConfirm — validate, clamp, and commit the entered value.
+   * Updates the appropriate state variable (seats/stops via kpLegacy,
+   * or fires the kpTarget callback for contextual fields).
+   */
+  function kpConfirm() {
+    let val = parseInt(kpBuffer, 10);
+    if (isNaN(val)) { closeKeypad(); return; }   // Nothing typed — dismiss silently
+    val = Math.max(kpMin, Math.min(kpMax, val));  // Clamp to [min, max]
 
-function calcAvailAt(idx) {
-  const onBoard      = calcOnBoardAt(idx);
-  const bookedBoard  = stops[idx].bookedBoard;
-  const bookedAlight = stops[idx].bookedAlight;
-  const woBoarding   = stops[idx].walkons.filter(w => w.boardedAt === idx).length;
-  const woOnBoard    = walkonsOnBoardAt(idx);
-  const taken        = onBoard + bookedBoard - bookedAlight + woOnBoard + woBoarding;
-  return Math.max(0, totalSeats - taken);
-}
-
-// ── Booked steppers ────────────────────────────────────────────────────────
-function adjBooked(type, delta) {
-  const s = stops[viewingStop];
-  if (type === 'board') {
-    s.bookedBoard = Math.max(0, s.bookedBoard + delta);
-  } else {
-    const maxAlight = calcOnBoardAt(viewingStop);
-    s.bookedAlight  = Math.max(0, Math.min(maxAlight, s.bookedAlight + delta));
-  }
-  renderStopView();
-}
-
-// Open keypad for booked board/alight fields
-function kpBookedTap(type) {
-  const isPast = viewingStop < currentStop;
-  if (isPast) return;
-  if (type === 'board') {
-    openKeypad(null, 0, totalSeats, 'Boarding This Stop', val => {
-      stops[viewingStop].bookedBoard = val;
-      renderStopView();
-    });
-  } else {
-    const maxAlight = calcOnBoardAt(viewingStop);
-    openKeypad(null, 0, maxAlight, 'Alighting This Stop', val => {
-      stops[viewingStop].bookedAlight = val;
-      renderStopView();
-    });
-  }
-}
-
-// ── Walk-on list ───────────────────────────────────────────────────────────
-function renderWalkonList(isPast) {
-  const s      = stops[viewingStop];
-  const list   = document.getElementById('walkons-list');
-  const tag    = document.getElementById('walkon-count-tag');
-  const active = s.walkons.filter(w => w.boardedAt === viewingStop);
-
-  tag.textContent = active.length ? `${active.length} added` : '';
-  list.innerHTML  = '';
-
-  if (active.length === 0) {
-    list.innerHTML = `<div style="font-size:0.72rem;color:var(--muted);padding:4px 0;">${isPast ? 'None boarded at this stop' : 'None added yet'}</div>`;
-    return;
-  }
-  active.forEach((wo, idx) => {
-    const item = document.createElement('div');
-    item.className = 'walkon-item';
-    item.innerHTML = `
-      <span class="wo-tag">WALK-ON #${idx + 1}</span>
-      <span class="wo-dest">→ Alights Stop ${wo.alightAt + 1}</span>
-      ${isPast ? '' : `<span class="wo-del" onclick="removeWalkon(${wo.id})">✕</span>`}`;
-    list.appendChild(item);
-  });
-}
-
-function removeWalkon(id) {
-  stops[viewingStop].walkons = stops[viewingStop].walkons.filter(w => w.id !== id);
-  renderStopView();
-}
-
-// ── Add walk-on flow ───────────────────────────────────────────────────────
-// Step 1: open destination picker
-function openAddWalkon() {
-  if (calcAvailAt(viewingStop) <= 0) return;
-  selectedDest  = null;
-  woQtyPending  = 0;
-
-  const sel = document.getElementById('dest-stop-selector');
-  sel.innerHTML = '';
-  for (let i = viewingStop + 1; i < numStops; i++) {
-    const btn = document.createElement('button');
-    btn.className   = 'stop-btn';
-    btn.textContent = (i === numStops - 1) ? 'Terminus' : `Stop ${i + 1}`;
-    btn.onclick = () => {
-      document.querySelectorAll('#dest-stop-selector .stop-btn').forEach(b => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      selectedDest = i;
-    };
-    sel.appendChild(btn);
-  }
-  document.getElementById('modal-walkon').classList.add('open');
-}
-
-function closeAddWalkon() { document.getElementById('modal-walkon').classList.remove('open'); }
-
-// Step 2: destination chosen — open keypad for quantity
-function confirmAddWalkon() {
-  if (selectedDest === null) { alert('Please select a destination stop.'); return; }
-  closeAddWalkon();
-
-  const avail    = calcAvailAt(viewingStop);
-  const destName = (selectedDest === numStops - 1) ? 'Terminus' : `Stop ${selectedDest + 1}`;
-
-  openKeypad(null, 1, avail, `How many? (max ${avail})`, qty => {
-    woQtyPending = qty;
-    if (qty === 1) {
-      // Single walk-on — add immediately, no confirm needed
-      finaliseWalkons();
-    } else {
-      // Multiple — show confirm panel
-      const destLabel = (selectedDest === numStops - 1) ? 'Terminus' : `Stop ${selectedDest + 1}`;
-      document.getElementById('woc-big').textContent = `${qty} walk-ons`;
-      document.getElementById('woc-sub').textContent =
-        `All alighting at ${destLabel}.\nTap "Add All" to confirm, or "Change" to go back.`;
-      document.getElementById('modal-wo-confirm').classList.add('open');
+    if (kpLegacy === 'seats') {
+      totalSeats = val;
+      document.getElementById('seats-val').textContent = val;
+    } else if (kpLegacy === 'stops') {
+      numStops = val;
+      document.getElementById('stops-val').textContent = val;
+    } else if (kpTarget) {
+      kpTarget(val);
     }
-  });
-}
 
-// Step 3: "Change" pressed on confirm sheet — go back to dest picker
-function cancelWoConfirm() {
-  document.getElementById('modal-wo-confirm').classList.remove('open');
-  woQtyPending = 0;
-  openAddWalkon();
-}
-
-// Step 4: finalise — add all walk-ons
-function finaliseWalkons() {
-  document.getElementById('modal-wo-confirm').classList.remove('open');
-  for (let i = 0; i < woQtyPending; i++) {
-    walkonIdSeq++;
-    stops[viewingStop].walkons.push({ id: walkonIdSeq, boardedAt: viewingStop, alightAt: selectedDest });
-  }
-  woQtyPending = 0;
-  renderStopView();
-}
-
-// ── Keypad ─────────────────────────────────────────────────────────────────
-// openKeypad(legacyField, min, max, labelText, callbackFn)
-// legacyField: 'seats' | 'stops' | null  (null = use callback)
-function openKeypad(legacyField, min, max, labelText, callbackFn) {
-  kpBuffer  = '';
-  kpMin     = min;
-  kpMax     = max;
-  kpTarget  = callbackFn || null;
-  kpLegacy  = legacyField;
-
-  document.getElementById('kp-title').textContent = 'Enter value';
-  document.getElementById('kp-label').textContent = labelText || '';
-  document.getElementById('kp-display').textContent = '—';
-  document.getElementById('modal-keypad').classList.add('open');
-}
-
-let kpLegacy = null;
-
-function kpDigit(d) {
-  if (kpBuffer.length >= 2) kpBuffer = kpBuffer.slice(1); // max 2 digits
-  kpBuffer += d;
-  // Strip leading zero
-  kpBuffer = String(parseInt(kpBuffer, 10));
-  document.getElementById('kp-display').textContent = kpBuffer || '0';
-}
-
-function kpDelete() {
-  kpBuffer = kpBuffer.slice(0, -1);
-  document.getElementById('kp-display').textContent = kpBuffer || '—';
-}
-
-function kpConfirm() {
-  let val = parseInt(kpBuffer, 10);
-  if (isNaN(val)) { closeKeypad(); return; }
-  val = Math.max(kpMin, Math.min(kpMax, val));
-
-  if (kpLegacy === 'seats') {
-    totalSeats = val;
-    document.getElementById('seats-val').textContent = val;
-  } else if (kpLegacy === 'stops') {
-    numStops = val;
-    document.getElementById('stops-val').textContent = val;
-  } else if (kpTarget) {
-    kpTarget(val);
-  }
-  closeKeypad();
-}
-
-function closeKeypad() {
-  document.getElementById('modal-keypad').classList.remove('open');
-  kpBuffer = '';
-  kpTarget = null;
-  kpLegacy = null;
-}
-
-// ── Depart ─────────────────────────────────────────────────────────────────
-function departStop() {
-  if (viewingStop !== currentStop) return;
-  const btn = document.getElementById('depart-btn');
-
-  if (!departPending) {
-    departPending = true;
-    btn.textContent = 'TAP AGAIN TO CONFIRM →';
-    btn.classList.add('confirming');
-    departTimer = setTimeout(resetDepartBtn, 3000);
-    return;
+    closeKeypad();
   }
 
-  clearTimeout(departTimer);
-  departPending = false;
-  btn.classList.remove('confirming');
-  stops[currentStop].departed = true;
-  currentStop++;
+  /** closeKeypad — dismiss the keypad modal and clear all keypad state */
+  function closeKeypad() {
+    document.getElementById('modal-keypad').classList.remove('modal--open');
+    kpBuffer = '';
+    kpTarget = null;
+    kpLegacy = null;
+  }
 
-  if (currentStop === numStops - 1) {
+
+  /* ==========================================================
+     12. DEPART
+     Double-tap guard: first tap turns the button red and sets
+     a 3-second timeout. Second tap within 3 s commits the depart.
+     ========================================================== */
+
+  /**
+   * departStop — handle a tap on the Depart button.
+   * First tap arms the guard; second tap (within 3 s) advances the journey.
+   */
+  function departStop() {
+    if (viewingStop !== currentStop) return;   // Cannot depart from a non-current stop
+    const btn = document.getElementById('depart-btn');
+
+    if (!departPending) {
+      // First tap — arm the confirmation guard
+      departPending = true;
+      btn.textContent = 'TAP AGAIN TO CONFIRM →';
+      btn.classList.add('btn--primary--confirming');
+      departTimer = setTimeout(resetDepartBtn, 3000);
+      return;
+    }
+
+    // Second tap — commit the departure
+    clearTimeout(departTimer);
+    departPending = false;
+    btn.classList.remove('btn--primary--confirming');
+    stops[currentStop].departed = true;
+    currentStop++;
+
+    // If the next stop is the terminus, go directly to the terminus screen
+    if (currentStop === numStops - 1) {
+      viewingStop = currentStop;
+      showTerminus();
+      return;
+    }
+
     viewingStop = currentStop;
-    showTerminus();
-    return;
+    renderStopView();
   }
 
-  viewingStop = currentStop;
-  renderStopView();
-}
-
-function resetDepartBtn() {
-  departPending = false;
-  clearTimeout(departTimer);
-  const btn = document.getElementById('depart-btn');
-  if (!btn) return;
-  btn.textContent = (currentStop === numStops - 2) ? 'ARRIVE TERMINUS →' : 'DEPART STOP →';
-  btn.classList.remove('confirming');
-}
-
-// ── Terminus ───────────────────────────────────────────────────────────────
-function showTerminus() {
-  showScreen('screen-terminus');
-
-  let finalOnBoard = calcOnBoardAt(numStops - 1);
-  for (let i = 0; i < numStops - 1; i++) {
-    stops[i].walkons.forEach(w => { if (w.alightAt >= numStops - 1) finalOnBoard++; });
+  /**
+   * resetDepartBtn — revert the Depart button to its default green state.
+   * Called automatically after 3 s if the second tap doesn't arrive.
+   */
+  function resetDepartBtn() {
+    departPending = false;
+    clearTimeout(departTimer);
+    const btn = document.getElementById('depart-btn');
+    if (!btn) return;
+    btn.textContent = (currentStop === numStops - 2) ? 'ARRIVE TERMINUS →' : 'DEPART STOP →';
+    btn.classList.remove('btn--primary--confirming');
   }
-  document.getElementById('terminus-onboard').textContent = finalOnBoard;
 
-  const tbody = document.getElementById('summary-tbody');
-  tbody.innerHTML = '';
-  for (let i = 0; i < numStops - 1; i++) {
-    const s       = stops[i];
-    const avail   = calcAvailAt(i);
-    const woCount = s.walkons.filter(w => w.boardedAt === i).length;
-    const onBd    = calcOnBoardAt(i) + s.bookedBoard - s.bookedAlight + woCount;
-    const tr      = document.createElement('tr');
-    tr.innerHTML  = `
-      <td class="td-stop">Stop ${i + 1}</td>
-      <td class="td-num">${s.bookedBoard}</td>
-      <td class="td-num">${s.bookedAlight}</td>
-      <td class="td-wo">${woCount}</td>
-      <td class="td-num">${avail}</td>
-      <td class="td-num">${onBd}</td>`;
-    tbody.appendChild(tr);
+
+  /* ==========================================================
+     13. TERMINUS
+     ========================================================== */
+
+  /**
+   * showTerminus — switch to the terminus screen and populate
+   * the final passenger total and per-stop summary table.
+   */
+  function showTerminus() {
+    showScreen('screen-terminus');
+
+    // Count all passengers who reach the terminus (booked net + walk-ons destined there)
+    let finalOnBoard = calcOnBoardAt(numStops - 1);
+    for (let i = 0; i < numStops - 1; i++) {
+      stops[i].walkons.forEach(w => {
+        if (w.alightAt >= numStops - 1) finalOnBoard++;
+      });
+    }
+    document.getElementById('terminus-onboard').textContent = finalOnBoard;
+
+    // Build the summary table — one row per active stop
+    const tbody = document.getElementById('summary-tbody');
+    tbody.innerHTML = '';
+
+    for (let i = 0; i < numStops - 1; i++) {
+      const s       = stops[i];
+      const avail   = calcAvailAt(i);
+      const woCount = s.walkons.filter(w => w.boardedAt === i).length;
+      const onBd    = calcOnBoardAt(i) + s.bookedBoard - s.bookedAlight + woCount;
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="summary-table__cell--stop">Stop ${i + 1}</td>
+        <td class="summary-table__cell--num">${s.bookedBoard}</td>
+        <td class="summary-table__cell--num">${s.bookedAlight}</td>
+        <td class="summary-table__cell--wo">${woCount}</td>
+        <td class="summary-table__cell--num">${avail}</td>
+        <td class="summary-table__cell--num">${onBd}</td>`;
+      tbody.appendChild(tr);
+    }
+
+    // Terminus row — labelled but no numeric data
+    const terminusRow = document.createElement('tr');
+    terminusRow.innerHTML = `
+      <td class="summary-table__cell--stop" style="color:var(--colour-muted);">
+        Stop ${numStops}
+      </td>
+      <td colspan="5" style="color:var(--colour-muted);font-size:0.7rem;letter-spacing:0.1em;">
+        TERMINUS
+      </td>`;
+    tbody.appendChild(terminusRow);
   }
-  const tr = document.createElement('tr');
-  tr.innerHTML = `
-    <td class="td-stop" style="color:var(--muted);">Stop ${numStops}</td>
-    <td colspan="5" style="color:var(--muted);font-size:0.7rem;letter-spacing:0.1em;">TERMINUS</td>`;
-  tbody.appendChild(tr);
-}
 
-// ── Reset ──────────────────────────────────────────────────────────────────
-function confirmReset() { document.getElementById('modal-reset').classList.add('open'); }
-function closeReset()   { document.getElementById('modal-reset').classList.remove('open'); }
 
-function resetJourney() {
-  closeReset();
-  totalSeats = 49; numStops = 4;
-  document.getElementById('seats-val').textContent = 49;
-  document.getElementById('stops-val').textContent = 4;
-  showScreen('screen-setup');
-}
+  /* ==========================================================
+     14. RESET
+     ========================================================== */
 
-// ── Screen switch ──────────────────────────────────────────────────────────
-function showScreen(id) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.getElementById(id).classList.add('active');
-}
+  /** confirmReset — show the reset confirmation modal */
+  function confirmReset() {
+    document.getElementById('modal-reset').classList.add('modal--open');
+  }
+
+  /** closeReset — dismiss the reset modal without resetting */
+  function closeReset() {
+    document.getElementById('modal-reset').classList.remove('modal--open');
+  }
+
+  /**
+   * resetJourney — discard all journey data and return to setup.
+   * Restores default values for seats (49) and stops (4).
+   */
+  function resetJourney() {
+    closeReset();
+    totalSeats = 49;
+    numStops   = 4;
+    document.getElementById('seats-val').textContent = 49;
+    document.getElementById('stops-val').textContent = 4;
+    showScreen('screen-setup');
+  }
+
+
+  /* ==========================================================
+     15. SCREEN SWITCH
+     ========================================================== */
+
+  /**
+   * showScreen — activate a named screen and hide all others.
+   * @param {string} id — the id of the screen element to show
+   */
+  function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('screen--active'));
+    document.getElementById(id).classList.add('screen--active');
+  }
+
 </script>
 </body>
 </html>
